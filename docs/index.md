@@ -11,18 +11,29 @@ This project documents:
 - 🧠 Hardware findings and reverse engineering
 - 💾 ROM dumps and disassemblies
 - 🛠️ Hardware modifications and modern replacements
-- 📷 High-resolution board photos
+- 📷 High-resolution board photos and scanned advertisements
 - 📘 Schematics and block diagrams
 
 ---
 
 ## 🔍 Explore the Repository
 
-- [📸 Photos](photos.md)
+- [📸 Photos](/photos/)
 - [💾 ROM Dumps](/roms/)
 - [📐 Schematics](/schematics/)
 - [🛠️ Experiments](/experiments/)
 - [📖 Disassemblies](/disassembly/)
+- [📰 Ad Translation (ASCII Magazine, Aug 1985)](qc11_advertisement_translation.html)
+
+---
+
+## 📰 Featured Advertisement: Epson QC-11 (ASCII Magazine, August 1985)
+
+A two-page Japanese ad from 1985 showcasing the QC-11 in a business setting.  
+Click the link above for full English translation.
+
+<img src="../magazine-scans/ascii_aug1985/qc11_advertisement_page1.jpg" alt="QC-11 Ad Page 1" width="48%">
+<img src="../magazine-scans/ascii_aug1985/qc11_advertisement_page2.jpg" alt="QC-11 Ad Page 2" width="48%">
 
 ---
 
@@ -36,6 +47,12 @@ This project documents:
 ## 🤝 Contribute
 
 Have ROMs, photos, or knowledge about the QX-11 or related Epson systems? Feel free to submit a pull request or open an issue.
+
+---
+
+## 💾 Disclaimer
+
+ROM dumps and photos are shared for **educational and preservation purposes only**. The copyright of any original software belongs to its respective owners.
 
 ---
 
