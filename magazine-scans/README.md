@@ -8,7 +8,8 @@ These materials help document the marketing, positioning, and public awareness o
 
 ## 📘 Scans from Physical Magazines
 
-### ASCII Magazine – August 1985 (Japan)
+
+[### ASCII Magazine – August 1985 (Japan)](ascii_august1985)
 - **qc11_advertisement.jpg** – RPDON advertisement for the Epson QC-11
 - **qc11_article_page1.jpg**, **page2.jpg** – Feature article describing the machine’s specs and business applications
 
