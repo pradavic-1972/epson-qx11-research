@@ -18,7 +18,7 @@ This project documents:
 
 ## 🔍 Explore the Repository
 
-- [📸 Photos](/photos/)
+- [📸 Photos](/photos.md/)
 - [💾 ROM Dumps](/roms/)
 - [📐 Schematics](/schematics/)
 - [🛠️ Experiments](/experiments/)
