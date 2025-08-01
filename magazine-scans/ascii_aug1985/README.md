@@ -8,8 +8,8 @@ This folder contains a full two-page Japanese advertisement for the **Epson QC-1
 
 ### 📄 Advertisement Scans
 
- [Left page of the ad](qc11_advertisement_page1.jpg)
-  [ Right page of the ad](qc11_advertisement_page2.jpg)
+ -[Left page of the ad](qc11_advertisement_page1.jpg)
+  -[ Right page of the ad](qc11_advertisement_page2.jpg)
 
 👉 A full translation of the ad is available here:  
 📘 [`qc11_advertisement_translation.md`](qc11_advertisement_translation.md)
