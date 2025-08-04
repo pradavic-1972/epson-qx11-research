@@ -12,7 +12,7 @@ This page contains high-resolution images of the Epson QX-11, showcasing its int
 ## 🖥️ Main Unit Views
 
 ### Front Side  
-![Main Unit Front]([photos/QX11-Front.jpg](https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/QX11-Front.jpg?raw=true))
+![Main Unit Front](https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/QX11-Front.jpg?raw=true)
 
 ### Back Side  
 ![Main Unit Back](photos/QX11-back.jpg)
