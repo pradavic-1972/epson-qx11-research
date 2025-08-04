@@ -12,10 +12,10 @@ This page contains high-resolution images of the Epson QX-11, showcasing its int
 ## 🖥️ Main Unit Views
 
 ### Front Side  
-![Main Unit Frontt](/photos/QX11-Front.jpg)
+![Main Unit Frontt](../photos/QX11-Front.jpg)
 
 ### Back Side  
-![Main Unit Back](/photos/QX11-back.jpg)
+![Main Unit Back](../photos/QX11-back.jpg)
 
 ---
 
