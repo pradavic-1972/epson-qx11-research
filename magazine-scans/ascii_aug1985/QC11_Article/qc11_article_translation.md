@@ -98,5 +98,5 @@ While understated, the QC-11 is a technically thoughtful machine. It offers real
 
 ---
 
-📄 Original article: [`QC11-ARTICLE_.pdf`](QC11-ARTICLE_.pdf)  
+📄 Original article: [`QC11-ARTICLE_.pdf`](QC11-ARTICLE_AUG1985.pdf)  
 📰 Source: ASCII Magazine, August 1985  
