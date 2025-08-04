@@ -4,7 +4,7 @@ layout: default
 ---
 
 # 📷 Epson QX-11 Photo Archive
-
+https://github.com/pradavic-1972/epson-qx11-research/blob/main/docs/photos.md
 This page contains high-resolution images of the Epson QX-11, showcasing its internal hardware, key components, and board layout.
 
 ---
@@ -15,7 +15,7 @@ This page contains high-resolution images of the Epson QX-11, showcasing its int
 ![Main Unit Front](https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/QX11-Front.jpg?raw=true)
 
 ### Back Side  
-![Main Unit Back](photos/QX11-back.jpg)
+![Main Unit Back](https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/QX11-back.jpg?raw=true)
 
 ---
 
