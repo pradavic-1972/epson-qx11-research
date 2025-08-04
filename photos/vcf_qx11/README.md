@@ -18,23 +18,13 @@ They show internal and external views of the Epson QX-11, including motherboard 
 
 ---
 
-## 📷 Suggested Filenames
+## 📷 Filenames
 
 When saving and uploading the images, you may rename them as:
 
-- `qx11_motherboard_front.jpg`  
-- `qx11_motherboard_rear.jpg`  
-- `qx11_case_interior.jpg`
+- `qx11_motherboard_top_1.jpg`  
+- `qx11_motherboard_top_2.jpg`  
+- `qx11_motherboard_ucD765AC_disc_controller.jpg`
+- `qx11_motherboard_diskDrive_EPSON_SMD-100.jpeg`
 
 ---
-
-## 📂 Folder Location
-
-Place this `README.md` and the images in:
-
-```
-/photos/vcf_qx11/
-```
-
-This ensures the images are credited and searchable along with your QX-11 documentation archive.
-
