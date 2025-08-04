@@ -32,7 +32,7 @@ This project documents:
 A two-page Japanese ad from 1985 showcasing the QC-11 in a business setting.  
 Click the link above for full English translation.
 
-<img src="../magazine-scans/ascii_aug1985/qc11_advertisement_page1.jpg" alt="QC-11 Ad Page 1" width="48%">
+<img src="/magazine-scans/ascii_aug1985/qc11_advertisement_page1.jpg" alt="QC-11 Ad Page 1" width="48%">
 <img src="../magazine-scans/ascii_aug1985/qc11_advertisement_page2.jpg" alt="QC-11 Ad Page 2" width="48%">
 
 ---
