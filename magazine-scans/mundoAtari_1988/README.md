@@ -26,7 +26,7 @@ This folder contains a scanned advertisement for the **Epson QX-11**, the South 
 ## 🌐 Archive Source
 
 This file was retrieved from the Internet Archive:  
-🔗 https://archive.org/details/MundoAtari10
+🔗https://archive.org/details/MundoAtari10/page/n43/mode/2up
 
 All credit for original preservation goes to the contributors of archive.org.
 
