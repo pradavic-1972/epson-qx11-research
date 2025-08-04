@@ -1,59 +1,47 @@
-# ✍️ Translation: Epson QX-11 Advertisement (Mundo Atari, March 1988)
+# ✍️ Literal Translation: Epson QX-11 Advertisement (Mundo Atari, March 1988)
 
-> 📄 Published in *Mundo Atari*, Issue No. 10  
-> 📍 Argentina & Chile  
-> 🗓️ March 1988  
-> 📂 Source: Last two pages of the PDF: `MundoAtari10.pdf`  
-
----
-
-## 📢 “EPSON ABACUS QX-11: The true MS-DOS microcomputer for business use.”
-
-The ad introduces the QX-11 — also referred to as the "Abacus" — highlighting it as a **true business-class MS-DOS machine**, robust and versatile for professional environments.
+> 📄 Source: *Mundo Atari*, Issue No. 10  
+> 📅 March 1988  
+> 🌎 Argentina and Chile  
+> 📂 Appears on the last two pages of `MundoAtari10.pdf`
 
 ---
 
-## 💡 Features Highlighted in the Ad
+## 🖥️ Advertisement Text (Translated Literally)
 
-- **MS-DOS Operating System in ROM**  
-  Instant startup with the operating system stored in ROM, without needing a boot disk.
+**The EPSON QX-11 computer was specially designed to meet the needs of users such as small businesses, professional studios, home work, education, computer training, as a word processor for secretaries, etc.**
 
-- **ROM Expansion via Cartridges**  
-  Users can insert cartridges with software, fonts, or other tools to expand functionality.
+**The EPSON QX-11, aside from being IBM/PC compatible and supporting software such as Lotus 1-2-3, dBase III, Wordstar, Word Perfect, and others based on the MS-DOS operating system, also comes with an integrated software package – in Spanish – called ABACUS, which was designed and programmed by the EPSON Foundation in conjunction with Simón Bolívar University in Venezuela.**
 
-- **Standard 256KB RAM (expandable to 512KB)**  
-  Suitable for most business applications and multitasking under MS-DOS.
+**It includes applications for Word Processing through a program called *PALABRAS*, Electronic Spreadsheets via a program called *NÚMEROS*, as well as Statistical Graphs, Database, and Drawing Generator.**
 
-- **High-Quality Keyboard Options**  
-  Full-size and compact keyboards available, depending on the setup.
-
-- **Video Output**  
-  Compatible with RGB monitors. A 12” green phosphor CRT is advertised as standard.
-
-- **Dual 3.5" Floppy Drives**  
-  Reliable TEAC-brand drives included, with 360KB capacity each.
-
-- **Support for External Peripherals**  
-  Including printers, plotters, and communication via RS-232C.
-
-- **Kanji Support (optional)**  
-  The system can be equipped with ROM cartridges for kanji fonts and Japanese input.
+**The EPSON QX-11 also stands out for its compact size, sturdy construction, professional expanded keyboard, 512 KB of RAM, and two 360 KB floppy disk drives.**
 
 ---
 
-## 🛠️ Market Positioning
+## 🔧 TECHNICAL SPECIFICATIONS
 
-- Designed as a **compact desktop system** for small to mid-size offices in Latin America.
-- **Distributed by R.P.D.O.N.**, the same company responsible for introducing Japanese Epson models to the South American market.
-- Promoted as a system that blends **Japanese reliability** with **MS-DOS global compatibility**.
-
----
-
-## 🏷️ Pricing & Contact (from ad)
-
-The advertisement encourages readers to contact local distributors in Argentina and Chile, and it emphasizes Epson’s **legacy of innovation** and the **future-readiness** of the QX-11 platform.
+- **CPU**: 16-bit INTEL 8088 microprocessor at 4.77 MHz  
+- **Main Memory**: 512 KB RAM  
+- **Internal Memory**: 64 KB ROM  
+- **Video Controller**: IBM/PC Compatible  
+- **Clock / Calendar**: Real-time built-in, battery-backed (CMOS)  
+- **Auxiliary Storage**: Two 360 KB floppy drives for 3.5” diskettes  
+- **Monitor**: 12” monochrome, high resolution  
 
 ---
 
-📄 Original scan: [`MundoAtari10.pdf`](MundoAtari10.pdf)  
-📜 Source: *Mundo Atari* Magazine, Issue 10 (March 1988)  
+## ➕ Other Features
+
+- MS-DOS operating system  
+- EPSoft software (ABACUS)  
+- Keyboard with separate numeric pad  
+- Audio line and speaker  
+- Joystick output  
+- RS-232C serial port  
+- Centronics-compatible parallel port  
+
+---
+
+**DISTRIBUTOR**  
+(Contact information appeared at the bottom of the ad.)
