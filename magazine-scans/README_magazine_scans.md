@@ -16,8 +16,8 @@ Each subfolder contains the original scan, translations, and historical context 
 
 ---
 
-### 🇯🇵 BEEP Magazine – August 1985
-- **Folder**: `beep_aug1985`
+### 🇯🇵 ASCII Magazine – August 1985
+- **Folder**: `ascii_aug1985`
 - Includes: 2-page article reviewing the Epson QC-11
 - Files:
   - `QC11-ARTICLE_.pdf`
