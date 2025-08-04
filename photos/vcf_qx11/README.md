@@ -26,5 +26,6 @@ When saving and uploading the images, you may rename them as:
 - `qx11_motherboard_top_2.jpg`  
 - `qx11_motherboard_ucD765AC_disc_controller.jpg`
 - `qx11_motherboard_diskDrive_EPSON_SMD-100.jpeg`
+- `qx11_setup_screen.jpeg`
 
 ---
