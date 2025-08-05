@@ -11,7 +11,7 @@ Click thumbnails to view full resolution.
 
 <table>
   <tr>
-    <td><a href="qx11_motherboard_top_1.jpeg"><img src="thumb_qx11_motherboard_top_1.jpeg" alt="Motherboard Top 1"></a></td>
+    <td><a href="/photos/qx11_motherboard_top_1.jpeg"><img src="thumb_qx11_motherboard_top_1.jpeg" alt="Motherboard Top 1"></a></td>
     <td><a href="qx11_motherboard_top_2.jpeg"><img src="thumb_qx11_motherboard_top_2.jpeg" alt="Motherboard Top 2"></a></td>
   </tr>
   <tr>
