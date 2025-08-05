@@ -11,7 +11,7 @@ Click thumbnails to view full resolution.
 
 <table>
   <tr>
-    <td><a href="https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/vcf_qx11/qx11_motherboard_top_1.jpeg?raw=true" alt="Motherboard Top 1"></a></td>
+    <td><a href="qx11_motherboard_top_1.jpeg"><img src="https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/vcf_qx11/qx11_motherboard_top_1.jpeg?raw=true"> alt="Motherboard Top 1"></a></td>
     <td><a href="qx11_motherboard_top_2.jpeg"><img src="thumb_qx11_motherboard_top_2.jpeg" alt="Motherboard Top 2"></a></td>
   </tr>
   <tr>
