@@ -59,4 +59,4 @@ ROM dumps and photos are shared for **educational and preservation purposes only
 ## 🔗 External Links
 
 - [Retrocomputing Wiki](https://wiki.retrocomputing.net/)
-- [uPD765AC Datasheet](https://archive.org/details/nec-upd765-datasheet)
+- [uPD765AC Datasheet](UPD765B.PDF)
