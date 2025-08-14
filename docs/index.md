@@ -20,7 +20,7 @@ This project documents:
 
 - [📸 Photos](photos.md)
 - [📸 Motherboard Gallery](photos/motherboard/gallery.md)
-- [🧠 IC Inventory](../ICs/index.md)
+- [🧠 IC Inventory](ICs/index.md)
 - [💾 ROM Dumps](/roms/)
 - [📐 Schematics](/schematics/)
 - [🛠️ Experiments](/experiments/)
