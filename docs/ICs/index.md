@@ -33,7 +33,7 @@ This page lists all the integrated circuits (ICs) identified on the Epson QX-11 
 | 74HC00                             | Quad NAN gates                                        |         nan | YES                   | ?                   | ?                       |
 | SN75189AN                          | Quadruple Line receivers                              |         nan | YES                   | ?                   | ?                       |
 | 74LS541                            | Octal buffer and line driver                          |         nan | YES                   | ?                   | ?                       |
-| D765AC                             | Single/Double Density Floppy-Disk Controller          |         nan | YES                   | YES                 | YES                     |
+| D765AC                             | Single/Double Density Floppy-Disk Controller          |         [Download: uPD765AC Datasheet (PDF)](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Datasheets/uPD765B.pdf)| YES                   | YES                 | YES                     |
 | MB3763                             | Bi-Directional motor driver                           |         nan | YES                   | ?                   | NO                      |
 | IJM2903                            | Precision voltage comparator                          |         nan | YES                   | ?                   | NO                      |
 | TL494C                             | PWM Controller                                        |         nan | YES                   | ?                   | NO                      |
