@@ -38,7 +38,7 @@ This page lists all the integrated circuits (ICs) identified on the Epson QX-11 
 | IJM2903                            | Precision voltage comparator                          |         nan | YES                   | ?                   | NO                      |
 | TL494C                             | PWM Controller                                        |         nan | YES                   | ?                   | NO                      |
 | TC4584BP                           | Hex Schmitt Trigger                                   |         nan | YES                   | ?                   | ?                       |
-| SED9421C0B                         | CMOS DATA SEPARATOR FOR FDD                           |         nan | YES                   | YES                 | YES                     |
+| SED9421C0B                         | CMOS DATA SEPARATOR FOR FDD                           |         [Download: SED9420CAC Datasheet (PDF)](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Datasheets/SED9420CAC.PDF) | YES                   | YES                 | YES                     |
 | KCC 16.000                         | Crystal                                               |         nan | YES                   | nan                 | nan                     |
 | KCC 14.31818                       | Crystal                                               |         nan | YES                   | ?                   | ?                       |
 | 74LS188N                           | Line transmitter 300kbp RS-232                        |         nan | YES                   | ?                   | ?                       |
