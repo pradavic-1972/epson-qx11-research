@@ -19,6 +19,7 @@ This project documents:
 ## 🔍 Explore the Repository
 
 - [📸 Photos](photos.md)
+- [Motherboard Gallery](photos/motherboard/gallery.md)
 - [💾 ROM Dumps](/roms/)
 - [📐 Schematics](/schematics/)
 - [🛠️ Experiments](/experiments/)
