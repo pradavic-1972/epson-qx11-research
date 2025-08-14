@@ -1,22 +1,21 @@
-# 🖼️ Epson QX-11 Motherboard Gallery
+# 🖼️ QX-11 Motherboard Photo Gallery
 
-These high-resolution images were photographed directly from a real Epson QX-11 unit by the repository maintainer.  
-They document the internal layout, key ICs, and important components of the system for reference and preservation.
-
----
+These are original high-resolution photos taken from a real Epson QX-11 unit for documentation and preservation.
 
 | Image | Description |
 |-------|-------------|
-| [<img src="thumb_qx11_motherboard_top_1.jpeg" alt="Motherboard Top View 1">](qx11_motherboard_top_1.jpeg) | **Top-down view of motherboard**: shows layout including dual floppy drive connectors and power circuitry. |
-| [<img src="thumb_qx11_motherboard_top_2.jpeg" alt="Motherboard Top View 2">](qx11_motherboard_top_2.jpeg) | **Alternate top-down view**: highlights CPU, RAM slots, and expansion connectors. |
-| [<img src="thumb_qx11_setup_screen.jpeg" alt="Setup Screen">](qx11_setup_screen.jpeg) | **ABACUS setup menu**: shows internal configuration options such as disk assignment and mode selection. |
-| [<img src="thumb_qx11_motherboard_diskDrive_EPSON_SMD-100.jpeg" alt="Disk Drive Close-up">](qx11_motherboard_diskDrive_EPSON_SMD-100.jpeg) | **SMD‑100 disk drive close-up**: detailed look at Epson disk drive mechanism. |
-| [<img src="thumb_qx11_motherboard_ROM.jpeg" alt="ROM Chips">](qx11_motherboard_ROM.jpeg) | **ROM chip cluster**: two Epson‑branded M25140CA / M25141CA ROM chips. |
-| [<img src="thumb_qx11_motherboard_ucD765AC_Disco_controller.jpeg" alt="Floppy Controller IC">](qx11_motherboard_ucD765AC_Disco_controller.jpeg) | **Floppy controller**: NEC μPD765AC FDC and custom disk controller IC. |
-| [<img src="thumb_qx11_GAFDDC.jpeg" alt="Gate Array GAFDDC">](qx11_GAFDDC.jpeg) | **GAFDDC gate array**: Epson E01037EA graphics adapter/display controller. |
-
----
-
-📸 Photographer: [Your Name or GitHub Handle]  
-📂 Folder: `photos/motherboard/`  
-📝 Licensing: Shared under CC BY-NC 4.0 (non-commercial use with attribution)
+| [<img src="thumb_MB_CPU_RAM-Expansion_slot.jpg" alt="MB CPU RAM Expansion slot" width="150">](MB_CPU_RAM-Expansion_slot.jpg) | MB CPU RAM Expansion slot |
+| [<img src="thumb_MB_GAVEMR-RAM50256.jpg" alt="MB GAVEMR RAM50256" width="150">](MB_GAVEMR-RAM50256.jpg) | MB GAVEMR RAM50256 |
+| [<img src="thumb_MB_TOP_RAM_CPU_ICRT_ROM_PSU.jpg" alt="MB TOP RAM CPU ICRT ROM PSU" width="150">](MB_TOP_RAM_CPU_ICRT_ROM_PSU.jpg) | MB TOP RAM CPU ICRT ROM PSU |
+| [<img src="thumb_MB_CPU8088_512KBRAM_Area.jpg" alt="MB CPU8088 512KBRAM Area" width="150">](MB_CPU8088_512KBRAM_Area.jpg) | MB CPU8088 512KBRAM Area |
+| [<img src="thumb_MB_HA16642_FDC_Area.jpg" alt="MB HA16642 FDC Area" width="150">](MB_HA16642_FDC_Area.jpg) | MB HA16642 FDC Area |
+| [<img src="thumb_MB-RAM_CPU_ROM_Cartridge.jpg" alt="MB RAM CPU ROM Cartridge" width="150">](MB-RAM_CPU_ROM_Cartridge.jpg) | MB RAM CPU ROM Cartridge |
+| [<img src="thumb_MB_FDC_RTC_Battery.jpg" alt="MB FDC RTC Battery" width="150">](MB_FDC_RTC_Battery.jpg) | MB FDC RTC Battery |
+| [<img src="thumb_MB_ROM_Gate-Arrays_RTC.jpg" alt="MB ROM Gate Arrays RTC" width="150">](MB_ROM_Gate-Arrays_RTC.jpg) | MB ROM Gate Arrays RTC |
+| [<img src="thumb_MB-Top_View.jpg" alt="MB Top View" width="150">](MB-Top_View.jpg) | MB Top View |
+| [<img src="thumb_MB_GAFDDC_D765_SED_RTC_SOUND.jpg" alt="MB GAFDDC D765 SED RTC SOUND" width="150">](MB_GAFDDC_D765_SED_RTC_SOUND.jpg) | MB GAFDDC D765 SED RTC SOUND |
+| [<img src="thumb_MB_ROM_GAVNID-GAVNIT_76489.jpg" alt="MB ROM GAVNID GAVNIT 76489" width="150">](MB_ROM_GAVNID-GAVNIT_76489.jpg) | MB ROM GAVNID GAVNIT 76489 |
+| [<img src="thumb_QX11-BackSide.jpg" alt="QX11 BackSide" width="150">](QX11-BackSide.jpg) | QX11 BackSide |
+| [<img src="thumb_MB_GAVDP_VRAM_FD_Connector.jpg" alt="MB GAVDP VRAM FD Connector" width="150">](MB_GAVDP_VRAM_FD_Connector.jpg) | MB GAVDP VRAM FD Connector |
+| [<img src="thumb_MB_ROM_PSU.jpg" alt="MB ROM PSU" width="150">](MB_ROM_PSU.jpg) | MB ROM PSU |
+| [<img src="thumb_VNS_ICRT-CGA_CARD.jpg" alt="VNS ICRT CGA CARD" width="150">](VNS_ICRT-CGA_CARD.jpg) | VNS ICRT CGA CARD |
