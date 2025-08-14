@@ -1,0 +1,26 @@
+---
+layout: default
+title: QX-11 Motherboard Gallery
+---
+
+# 🖼️ Epson QX-11 Motherboard Gallery
+
+These high-resolution images were taken directly from a real Epson QX-11 unit.
+
+| Image | Description |
+|-------|-------------|
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_CPU_RAM-Expansion_slot.jpg" alt="MB CPU RAM Expansion slot" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_CPU_RAM-Expansion_slot.jpg) | MB CPU RAM Expansion slot |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_GAVEMR-RAM50256.jpg" alt="MB GAVEMR RAM50256" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_GAVEMR-RAM50256.jpg) | MB GAVEMR RAM50256 |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_TOP_RAM_CPU_ICRT_ROM_PSU.jpg" alt="MB TOP RAM CPU ICRT ROM PSU" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_TOP_RAM_CPU_ICRT_ROM_PSU.jpg) | MB TOP RAM CPU ICRT ROM PSU |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_CPU8088_512KBRAM_Area.jpg" alt="MB CPU8088 512KBRAM Area" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_CPU8088_512KBRAM_Area.jpg) | MB CPU8088 512KBRAM Area |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_HA16642_FDC_Area.jpg" alt="MB HA16642 FDC Area" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_HA16642_FDC_Area.jpg) | MB HA16642 FDC Area |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB-RAM_CPU_ROM_Cartridge.jpg" alt="MB RAM CPU ROM Cartridge" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB-RAM_CPU_ROM_Cartridge.jpg) | MB RAM CPU ROM Cartridge |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_FDC_RTC_Battery.jpg" alt="MB FDC RTC Battery" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_FDC_RTC_Battery.jpg) | MB FDC RTC Battery |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_ROM_Gate-Arrays_RTC.jpg" alt="MB ROM Gate Arrays RTC" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_ROM_Gate-Arrays_RTC.jpg) | MB ROM Gate Arrays RTC |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB-Top_View.jpg" alt="MB Top View" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB-Top_View.jpg) | MB Top View |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_GAFDDC_D765_SED_RTC_SOUND.jpg" alt="MB GAFDDC D765 SED RTC SOUND" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_GAFDDC_D765_SED_RTC_SOUND.jpg) | MB GAFDDC D765 SED RTC SOUND |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_ROM_GAVNID-GAVNIT_76489.jpg" alt="MB ROM GAVNID GAVNIT 76489" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_ROM_GAVNID-GAVNIT_76489.jpg) | MB ROM GAVNID GAVNIT 76489 |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_QX11-BackSide.jpg" alt="QX11 BackSide" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/QX11-BackSide.jpg) | QX11 BackSide |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_GAVDP_VRAM_FD_Connector.jpg" alt="MB GAVDP VRAM FD Connector" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_GAVDP_VRAM_FD_Connector.jpg) | MB GAVDP VRAM FD Connector |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_MB_ROM_PSU.jpg" alt="MB ROM PSU" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/MB_ROM_PSU.jpg) | MB ROM PSU |
+| [<img src="https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/thumb_VNS_ICRT-CGA_CARD.jpg" alt="VNS ICRT CGA CARD" width="150">](https://raw.githubusercontent.com/pradavic-1972/epson-qx11-research/main/photos/motherboard/VNS_ICRT-CGA_CARD.jpg) | VNS ICRT CGA CARD |
