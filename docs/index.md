@@ -21,6 +21,7 @@ This project documents:
 - [📸 Photos](photos.md)
 - [📸 Motherboard Gallery](photos/motherboard/gallery.md)
 - [🧠 IC Inventoryof the QX/QC-11](ICs/index.md)
+- [🎮 Joystick Port Info](joystick.md)
 - [💾 ROM Dumps](/roms/)
 - [📐 Schematics](/schematics/)
 - [🛠️ Experiments](/experiments/)
