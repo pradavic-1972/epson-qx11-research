@@ -19,6 +19,7 @@ This project documents:
 ## 🔍 Explore the Repository
 
 - [📸 Photos](photos.md)
+- [Epson QC-11 Wins Good Design Award](awards.md)
 - [📸 Motherboard Gallery](photos/motherboard/gallery.md)
 - [🧠 IC Inventoryof the QX/QC-11](ICs/index.md)
 - [🎮 Joystick Port Info](joystick.md)
