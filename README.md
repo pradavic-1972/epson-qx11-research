@@ -38,7 +38,6 @@ epson-qx11-research/
 
 ### ✅ ROM Dumps
 - `system_rom_high.bin` and `system_rom_low.bin` – Original QX-11 MS-DOS 2.11 ROM
-- `cartridge_flappy_game.bin` – Cartridge dump of the Flappy game
 
 ### ✅ Reverse Engineering
 - GAFDDC to uPD765 FDC signal mapping
