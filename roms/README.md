@@ -30,7 +30,7 @@ This folder contains two ROM images dumped from an Epson **QX‑11** (a.k.a. Eps
 - CRC32: `B0AC8134`
 
 ---
-### ) `qx11_font_8x8.pbm`
+### `qx11_font_8x8.pbm`
 **Role:** **This file is part of the QX-11 BIOS but I extracted for the purpose of this Documentation**  
 - Character generator table. The QX-11 will look into this table when drawing a character on screen. It is an 8x8 font.  
 
