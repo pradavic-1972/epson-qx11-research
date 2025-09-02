@@ -3,6 +3,7 @@
 This folder contains two ROM images dumped from an Epson **QX‑11** (a.k.a. Epson Abacus / QC‑11). Together they implement **ROM‑DOS 2.11** with the command shell and a BIOS/DOS‑kernel split across two chips.
 
 ---
+For a more detailed analysis of the QX-11 BIOS check the (QX11_ROM_Mapping_and_IVT_Explanatory.md)
 
 ## Files in this folder
 
