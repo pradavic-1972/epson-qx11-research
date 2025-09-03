@@ -20,6 +20,7 @@ This project documents:
 
 - [📸 Photos](photos.md)
 - [Epson QC-11 Wins Good Design Award](awards.md)
+- [How the QX-11 renders text](qx11_text_rendering.md)
 - [📸 Motherboard Gallery](photos/motherboard/gallery.md)
 - [🧠 IC Inventoryof the QX/QC-11](ICs/index.md)
 - [🎮 Joystick Port Info](joystick.md)
