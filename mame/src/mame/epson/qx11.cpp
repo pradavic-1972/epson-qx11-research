@@ -5,6 +5,15 @@
 #include "cpu/i86/i86.h"
 #include "machine/ram.h"
 
+// CGA Card
+#include "bus/isa/isa.h"
+#include "bus/isa/isa_cards.h"     // card lists (pc_isa8_cards)
+#include "bus/isa/cga.h"
+#include "bus/isa/ega.h"  
+#include "video/pc_vga.h"  
+//#include "bus/epson_qx/keyboard/matrix_qx11.h"
+//
+
 // Floppy disk support 
 #include "machine/upd765.h"
 #include "imagedev/floppy.h"
@@ -47,6 +56,33 @@ typedef uint8_t u8;
 // Serial Port 
 #define LOG_SERIAL   (1U << 2)
 
+#include "bus/isa/ega.h"
+
+/*
+class qx11_isa8_cga_device : public isa8_cga_device
+{
+public:
+    qx11_isa8_cga_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+        : isa8_cga_device(mconfig, tag, owner, clock) {}
+
+    void set_screen_tag(const char *tag) { m_screen.set_tag(tag); }
+
+    // Try rgb32 first; if it doesn't compile, switch to the ind16 overload below.
+    u32 public_screen_update(screen_device &screen, bitmap_rgb32 &bmp, const rectangle &clip)
+    { return isa8_cga_device::screen_update(screen, bmp, clip); }
+
+  
+
+    // If your tree wants indexed-16 instead, use this and comment the rgb32 one:
+    // u32 public_screen_update(screen_device &screen, bitmap_ind16 &bmp, const rectangle &clip)
+    // { return isa8_cga_device::screen_update(screen, bmp, clip); }
+};
+
+DEFINE_DEVICE_TYPE(QX11_ISA8_CGA, qx11_isa8_cga_device, "qx11_cga", "QX-11 CGA (public update)")
+
+*/
+
+
 class qx11_state : public driver_device
 {
 public:
@@ -54,8 +90,10 @@ public:
         : driver_device(mconfig, type, tag)
         , m_maincpu(*this, "maincpu")
         , m_ram(*this, "ram")
+        
         , m_pic_s(*this, "pic8259")
-        , m_qx11screen(*this, "screen")
+        , m_screen(*this, "screen")
+        //, m_palette(*this, "palette")
         , m_vram8000(*this, "vram8000")
         , m_vram9000(*this, "vram9000") 
         , m_textbuffer(*this, "textbuffer")  
@@ -65,6 +103,10 @@ public:
         , m_floppy(*this, "upd765:%u", 0U)
         , m_postmux(*this, "postmux")    
         , m_psg(*this, "sn76489")  
+        , m_isabus(*this, "isa8")
+        , m_cga(*this, "isa1:cga_mc1502")
+      //  , m_epkbd(*this,"keyboard_device")
+        //, m_vga(*this,"vga")
       
 
         
@@ -84,6 +126,7 @@ public:
     DECLARE_INPUT_CHANGED_MEMBER(key_down_changed);
     DECLARE_INPUT_CHANGED_MEMBER(key_left_changed);
     DECLARE_INPUT_CHANGED_MEMBER(key_right_changed);
+    DECLARE_INPUT_CHANGED_MEMBER(key_f9_changed);
 
 
     protected:
@@ -93,6 +136,23 @@ public:
     u32 screen_update_qx11(screen_device &screen, bitmap_rgb32 &bmp, const rectangle &clip);
 
 private:
+// --- BEGIN: QX-11 PC-compatible keyboard helpers ---
+
+    // enqueue one INT 16h "word" (AL=ascii, AH=scancode) into BDA ring buffer
+    void bios_kbd_enqueue(u8 ascii, u8 sc);
+    // update BDA shift flags at 0040:0017 (mask is bits to set/clear)
+    void set_shift_flags(u8 mask, bool pressed);
+
+    // MAME input change handlers (bind in INPUT_PORTS below)
+    INPUT_CHANGED_MEMBER(key_makebreak_changed);  // param = Set-1 scancode
+    INPUT_CHANGED_MEMBER(mod_changed);            // param = mask bit to set/clear
+
+
+
+    // Optional: ASCII -> Set-1 scancode for printables (US layout, minimal)
+    static u8 ascii_to_set1(u8 ch);
+// --- END: QX-11 PC-compatible keyboard helpers ---
+
     void mem_map(address_map &map);
     void io_map(address_map &map);
     
@@ -106,7 +166,29 @@ private:
     memory_passthrough_handler m_int10_vec_tap{};
     memory_passthrough_handler m_int10_entry_tap{};
 
-  
+    void mirror_cell_from_shadow(offs_t shadow_word_addr);
+
+             // 8 scanlines per glyph
+
+// --- Shadow text buffer: 80*25*2 bytes (char,attr) at 0000:0B05 (physical 0x0000B05) ---
+static constexpr offs_t SHADOW_BASE  = 0x0000B05;
+//static constexpr offs_t SHADOW_BASE  = 0x00b800;
+static constexpr offs_t SHADOW_END   = SHADOW_BASE + 80*25*2 - 1; // inclusive
+
+// --- Text bitmap plane the QX-11 scans (you already render this) ---
+static constexpr u32 TXT_PHYS    = 0x9000u << 4;   // 0x90000 physical
+static constexpr u32 TXT_BASEOFF = 0x0100u;        // first visible text scanline
+static constexpr u32 COL_STRIDE  = 0x0200u;        // 512 bytes per character column
+
+// --- BIOS ROM font (8x8), 256 glyphs x 8 bytes (you dumped at 0xF6560) ---
+static constexpr u32 FONT_PHYS_BASE = 0x00F6560u;
+static constexpr int FONT_HEIGHT    = 8;
+
+void draw_text_cell_from_rom(int row, int col, u8 ch);
+void maybe_refresh_text_from_rom();
+inline void draw_text_cell_from_extfont(int row, int col, u8 ch);
+
+
     int m_expect = 0;   // how many params to collect for current command
     int m_resleft = 0;  // expected result bytes
 
@@ -162,11 +244,16 @@ private:
     required_device<i8088_cpu_device> m_maincpu;
 
     required_device<ram_device>       m_ram;
+    
     required_device<pic8259_device>   m_pic_s;
-    required_device<screen_device>   m_qx11screen;
+    required_device<screen_device>   m_screen;
+    //optional_device<palette_device> m_palette;
 
     required_device<qx11_postmux_device> m_postmux;  // add to your state
-
+    required_device<isa8_device>        m_isabus;
+    required_device<isa8_cga_mc1502_device> m_cga;
+    //required_device<vga_device> m_vga;
+    //optional_device<bus::epson_qx::keyboard::keyboard_port_device> m_epkbd;
     u8 io12_counter = 0;
 
     // Frame Buffer to draw characters
@@ -206,6 +293,11 @@ private:
 
     // Keep a handle so we can remove/replace the tap cleanly
     memory_passthrough_handler m_io_tap;
+    memory_passthrough_handler m_shadow_tap;
+
+    void clear_full_text_bitmap();
+    void clear_text_cell_bitmap(int row, int col);
+    void refresh_text_from_extfont_if_dirty();
 
     u8 m_latched_dor = 0x00;
 
@@ -248,6 +340,15 @@ static constexpr int  ROWS        = 25;
 void sync_from_bios_page_pointer();
 void rasterize_textbuffer_to_bitmap();
 void rasterize_textbuffer_highlight_only();
+
+void activate_cga_output();
+void activate_native_output();
+void cga_seen_w(offs_t, u8);
+
+void qx11_palette_init(palette_device &palette) const;
+//u8 ascii_to_set1(u8 ch);
+//void set_shift_flags(u8 mask, bool pressed);
+//void bios_kbd_enqueue(u8 ascii, u8 sc);
 
 
 ///// SERIAL PORT (COM1) /////
@@ -345,10 +446,21 @@ u8   m_p81_latched = 0x00;
 u8   m_p81_status  = 0x02;   // bit1 set => ready
 u8   m_p81_delay   = 0;      // small poll delay before bit1 rises
 
+pic8259_device*  m_pic = nullptr;
+
 void dma_p81_w(u8 data);
 u8 dma_p81_r();
 
 bool cmos_initialized = false;
+
+// INT 08 Timer
+
+emu_timer* m_tick = nullptr;
+void tick_cb(int param);   // <- signature must be exactly void(int)
+void bios_tick_once();
+bool post_ready = false;
+
+// int 08 timer ends
 
 
 // --- GA-DMA registers (captured from the 6-byte payload) ---
@@ -886,7 +998,7 @@ void qx11_state::fdc_intrq_w(int state)
     
 
      // active low
-    logerror("FDC: INTRQ %d\n", state);
+    //logerror("FDC: INTRQ %d\n", state);
     //m_maincpu->set_input_line(INPUT_LINE_IRQ0, state);
     
      switch (state)
@@ -909,32 +1021,40 @@ void qx11_state::fdc_intrq_w(int state)
 
 //////////////////// ********** SCREEN ********** ///////////////////
 
+
+void qx11_state::qx11_palette_init(palette_device &palette) const
+{
+    palette.set_pen_color(0, rgb_t(0x00, 0x00, 0x00)); // black
+    palette.set_pen_color(1, rgb_t(0xFF, 0xFF, 0xFF)); // white
+}
+
 u32 qx11_state::screen_update_qx11(screen_device &screen, bitmap_rgb32 &bmp, const rectangle &clip)
 {
-    // ---------- constants ----------
-    constexpr u32 COL_STRIDE      = 0x0200;   // byte-columns are 0x200 apart
+    //maybe_refresh_text_from_rom();
+    refresh_text_from_extfont_if_dirty();
 
-    // Graphics plane (keep your working setup)
-    constexpr u32 GFX_BASE_TOP    = 0x0000;   // ES=0x8000
-    constexpr u32 GFX_BASE_BOTTOM = 0x0100;   // ES=0x8010 (extra base for y>=200)
-    constexpr int GFX_COLS_DRAW   = 80;       // full width (keep as-is)
-    constexpr int BOTTOM_COL_BIAS = 0;        // 0..3 if your bottom half needs nudging
+    // ---------------- Constants ----------------
+    constexpr u32 COL_STRIDE      = 0x0200;   // 512 bytes between character columns (confirmed by dump)
+    // Graphics plane in ES=0x8000 window
+    constexpr u32 GFX_BASE_TOP    = 0x0000;   // top field
+    constexpr u32 GFX_BASE_BOTTOM = 0x0100;   // bottom field base (y >= 200)
+    constexpr int GFX_COLS_DRAW   = 80;
+    constexpr int BOTTOM_COL_BIAS = 0;
 
-    // Text plane — TOP HALF ONLY (640x200), with software scroll origin
-    constexpr u32 TXT_BASE_TOP    = 0x00100;  // ES=0x9010 (+0x100)
-    constexpr int TXT_COLS_DRAW   = 80;       // full width
+    // Text plane — bitmap rasterized at 0x9000:0100 (top 200 lines source)
+    constexpr u32 TXT_BASE_TOP    = 0x00100;
+    constexpr int TXT_COLS_DRAW   = 80;
 
     // Colors
-    const u32 BG = rgb_t(0xFF,0x00,0x00,0x00);
-    const u32 FG = rgb_t(0xFF,0x00,0xFF,0x00);
+    const u32 BG = rgb_t(0xFF,0x00,0x00,0x00);  // black
+    const u32 FG = rgb_t(0xFF,0x00,0xFF,0x00);  // green
 
     bmp.fill(BG, clip);
-    rasterize_textbuffer_to_bitmap(); // keep your attribute flags
 
     const u32 bytes8000 = m_vram8000.bytes();
     const u32 bytes9000 = m_vram9000.bytes();
 
-    // ---------- PASS A: GRAPHICS (unchanged) ----------
+    // -------------------------------- PASS A: GRAPHICS (unchanged) --------------------------------
     for (int y = std::max(clip.min_y, 0); y <= std::min(clip.max_y, 399); ++y) {
         u32 *dst = &bmp.pix(y, clip.min_x);
 
@@ -963,98 +1083,233 @@ u32 qx11_state::screen_update_qx11(screen_device &screen, bitmap_rgb32 &bmp, con
         }
     }
 
-    // ---------- PASS B: TEXT (TOP 200 lines only) with software origin ----------
-    // We keep a tiny per-frame signature of each 8-pixel text band (25 bands).
-    // If the new frame looks like the previous frame shifted by +1 band, we advance the origin (scroll up 8px).
-    {
-        // Persistent state across frames
-        static bool  s_init = false;
-        static int   s_txt_start_band = 0;      // 0..24 (virtual origin band)
-        static u16   s_prev_sig[25] = {0};      // previous band signatures
+    // In qx11_state:
+int m_text_margin_x = 4;   // pixels to shift text right
+int m_text_margin_y = 1;   // pixels to shift text down
+// ------------------------------ PASS B: TEXT (8x16 via vertical doubling, with margins) ------------------------------
+{
+    constexpr int ROWS = 25;
+    constexpr int COLS = 80;
+    constexpr int CELL_SRC_H = 8;   // source glyph height (in VRAM)
+    // destination cell height = 16 (8*2) implicitly
 
-        // Build current signatures
-        u16 cur_sig[25] = {0};
-        int nonzero_total = 0;
+    const int y_min = std::max(clip.min_y, 0);
+    const int y_max = std::min(clip.max_y, 399);
 
-        for (int band = 0; band < 25; ++band) {
-            u16 sig = 0;
-            for (int sub = 0; sub < 8; ++sub) {
-                const u32 line_base = TXT_BASE_TOP + u32(band)*0x08 + u32(sub);
-                // sample a handful of spread columns to make a quick signature
-                for (int col : { 0, 5, 10, 20, 30, 40, 60, 79 }) {
-                    const u32 off = line_base + u32(col) * COL_STRIDE;
-                    if (off < bytes9000) sig = (sig * 131) ^ m_vram9000[off];
-                }
-            }
-            cur_sig[band] = sig;
-            if (sig) ++nonzero_total;
-        }
+    const int MARGIN_X = m_text_margin_x;  // <-- configurable
+    const int MARGIN_Y = m_text_margin_y;  // <--
 
-        // Detect CLS (clear) → reset origin
-        if (nonzero_total == 0) {
-            s_txt_start_band = 0;
-            // fall through (we still render; it'll be empty until text arrives)
-        } else if (s_init) {
-            // Check if current looks like previous shifted by +1 band
-            int matches_plus1 = 0, matches_0 = 0;
-            for (int i = 0; i < 25; ++i) {
-                if (cur_sig[i] == s_prev_sig[i])                 ++matches_0;
-                if (cur_sig[i] == s_prev_sig[(i + 1) % 25])      ++matches_plus1;
-            }
-            // Conservative rule: require more agreement on +1 than 0 to advance
-            if (matches_plus1 > matches_0 + 4) {                 // margin to avoid jitter
-                s_txt_start_band = (s_txt_start_band + 1) % 25;  // scroll up by one 8px row
-            }
-        }
-        // Save signatures for next frame
-        for (int i = 0; i < 25; ++i) s_prev_sig[i] = cur_sig[i];
-        s_init = true;
+    for (int row = 0; row < ROWS; ++row) {
+        const int y_src_base = row * CELL_SRC_H;      // 0..199
+        const int y_dst_base = MARGIN_Y + row * 16;   // apply top margin
 
-        // Now render the text page at y=0..199 using the virtual origin
-        const int y_min = std::max(clip.min_y, 0);
-        const int y_max = std::min(clip.max_y, 199);
+        if (y_dst_base > y_max)
+            break;                       // further rows are below the clip
+        if (y_dst_base + 15 < y_min)
+            continue;                    // this row is entirely above the clip
 
-        for (int y = y_min; y <= y_max; ++y) {
-            u32 *dst = &bmp.pix(y, clip.min_x);
+        for (int gy = 0; gy < CELL_SRC_H; ++gy) {
+            const int y_src = y_src_base + gy;                      // 0..199
+            const u32 y_swz = u32(y_src & 7) + u32(y_src >> 3) * 0x08;
 
-            const int rel_y = y;                  // top field only
-            const int row8  = rel_y >> 3;         // 0..24 visible rows
-            const int sub   = rel_y & 7;          // 0..7
+            // Write each 1-pixel source line twice to make 16px tall
+            for (int rep = 0; rep < 2; ++rep) {
+                const int y_dst = y_dst_base + (gy * 2 + rep);
+                if (y_dst < y_min || y_dst > y_max) continue;
 
-            const int vrow8 = (row8 + s_txt_start_band) % 25;  // apply software scroll origin
-            const u32 base  = TXT_BASE_TOP + u32(vrow8) * 0x08 + u32(sub);
+                u32 *dst = &bmp.pix(y_dst, clip.min_x);
 
-            for (int col = 0; col < TXT_COLS_DRAW; ++col) {
-                const u32 off = base + u32(col) * COL_STRIDE;
-                if (off >= bytes9000) break;
+                for (int col = 0; col < COLS; ++col) {
+                    const u32 off = TXT_BASE_TOP + y_swz + u32(col) * COL_STRIDE;
+                    if (off >= bytes9000) break;
 
-                const u8 b = m_vram9000[off];
-                const int x_start = (col << 3);
+                    const u8 b = m_vram9000[off];
 
-                for (int bit = 0; bit < 8; ++bit) {
-                    const int x = x_start + bit;
-                    if (x < clip.min_x || x > clip.max_x) continue;
+                    // Left margin: shift where we draw on screen
+                    const int x_start = MARGIN_X + (col << 3);
 
-                    // Attribute lookup from your logical 25×80 buffer at the *displayed* row
-                    const int cell_idx = row8 * 80 + col;    // row8 is the on-screen row index (0..24)
-                    const bool inv     = (m_textbuffer[cell_idx * 2 + 0] == 'p');
+                    // Optional invert using your m_textbuffer (kept from your code)
+                    bool inv = false;
+                    if (m_textbuffer) {
+                        const int cell_idx = row * 80 + col;
+                        inv = (m_textbuffer[cell_idx * 2 + 0] == 'p');
+                    }
 
-                    const bool on = ((b >> (7 - bit)) & 1) ^ inv;
-                    if (on) dst[x - clip.min_x] = FG;        // overlay over graphics
+                    // Foreground-only draw so graphics show through
+                    for (int bit = 0; bit < 8; ++bit) {
+                        const int x = x_start + bit;
+                        if (x < clip.min_x || x > clip.max_x) continue;
+
+                        const bool on = ((b >> (7 - bit)) & 1) ^ inv;
+                        if (on) dst[x - clip.min_x] = FG;
+                    }
                 }
             }
         }
     }
+}
 
     return 0;
 }
 
+// Bulk clear entire 80x25 text plane in the 0x9000 bitmap
+void qx11_state::clear_full_text_bitmap()
+{
+    address_space &prog = m_maincpu->space(AS_PROGRAM);
+    // rows 0..24, cols 0..79
+    for (int row = 0; row < 25; ++row)
+        for (int col = 0; col < 80; ++col)
+            clear_text_cell_bitmap(row, col);
+}
 
+u32  m_font_base_phys = 0x00F6560;  // your current best guess
+int  m_font_index_bias = 0x00;         // try 0 or -0x20 if table starts at ' ' (0x20)
+bool m_font_flip_rows  = true;     // true if the table is upside down
+
+void qx11_state::draw_text_cell_from_rom(int row, int col, u8 ch)
+{
+    address_space &prog = m_maincpu->space(AS_PROGRAM);
+
+    const u32 base = (0x9000u << 4) + 0x0100u + u32(col) * 0x0200u;
+    const u32 y0   = u32(row) * FONT_HEIGHT;
+
+    for (int sub = 0; sub < FONT_HEIGHT; ++sub) {
+        const u32 rom  = FONT_PHYS_BASE + u32(ch) * FONT_HEIGHT + sub; // idx = ch
+        const u8  bits = prog.read_byte(rom);
+        prog.write_byte(base + (y0 + sub), bits);  // overwrite (not XOR)
+    }
+}
+
+
+// Shadow buffer region: 80*25*2 bytes (char,attr) starting at 0000:0B05
+static constexpr offs_t SHADOW_BASE = 0x0000B05;
+//static constexpr offs_t SHADOW_BASE = 0x00B800;
+static constexpr offs_t SHADOW_END  = SHADOW_BASE + 80*25*2 - 1;
+
+bool m_text_frame_dirty = false;  // add to your state class
+
+void qx11_state::maybe_refresh_text_from_rom()
+{
+    if (!m_text_frame_dirty) return;
+    m_text_frame_dirty = false;
+
+    address_space &prog = m_maincpu->space(AS_PROGRAM);
+    offs_t a = SHADOW_BASE;
+
+    for (int row = 0; row < 25; ++row)
+        for (int col = 0; col < 80; ++col, a += 2) {
+            const u8 ch = prog.read_byte(a);
+            if (ch == 0x20 || ch == 0x00) clear_text_cell_bitmap(row, col);
+            else                           draw_text_cell_from_rom(row, col, ch);
+        }
+}
+
+static constexpr u32 TXT_PHYS    = 0x9000u << 4; // 0x90000
+static constexpr u32 TXT_BASEOFF = 0x0100u;
+static constexpr u32 COL_STRIDE  = 0x0200u;
+static constexpr int GLYPH_H     = 8;
+
+void qx11_state::clear_text_cell_bitmap(int row, int col)
+{
+    address_space &p = m_maincpu->space(AS_PROGRAM);
+    const u32 base = (TXT_PHYS + TXT_BASEOFF) + u32(col) * COL_STRIDE;
+    const u32 y0   = u32(row) * GLYPH_H;
+    for (int s = 0; s < GLYPH_H; ++s) p.write_byte(base + (y0 + s), 0x00);
+}
+
+inline void qx11_state::draw_text_cell_from_extfont(int row, int col, u8 ch)
+{
+    const u8 *font = memregion("extfont")->base();
+    if (!font) return;  // safety
+    const u8 *glyph = &font[u32(ch) * GLYPH_H];
+
+    address_space &p = m_maincpu->space(AS_PROGRAM);
+    const u32 base = (TXT_PHYS + TXT_BASEOFF) + u32(col) * COL_STRIDE;
+    const u32 y0   = u32(row) * GLYPH_H;
+
+    for (int s = 0; s < GLYPH_H; ++s)
+        p.write_byte(base + (y0 + s), glyph[s]);   // overwrite (not XOR)
+}
+
+void qx11_state::refresh_text_from_extfont_if_dirty()
+{
+    if (!m_text_frame_dirty) return;
+    m_text_frame_dirty = false;
+
+    address_space &p = m_maincpu->space(AS_PROGRAM);
+    offs_t a = SHADOW_BASE;
+    
+
+
+    for (int row = 0; row < 25; ++row)
+        for (int col = 0; col < 80; ++col, a += 2) {
+            const u8 ch = p.read_byte(a);
+            if (ch == 0x00 || ch == 0x20) clear_text_cell_bitmap(row, col);
+            else                           draw_text_cell_from_extfont(row, col, ch);
+        }
+}
+
+void qx11_state::activate_cga_output()
+{
+    // Use the CGA device’s screen_update (adjust bitmap type if your tree differs)
+     //m_screen->set_screen_update(*m_cga, FUNC(isa8_ega_device::clock));
+}
+
+
+void qx11_state::activate_native_output()
+{
+   m_screen->set_screen_update(*m_cga, FUNC(qx11_state::screen_update_qx11));
+}
+
+void qx11_state::cga_seen_w(offs_t, u8)
+{
+    activate_cga_output(); 
+}
 //////////////////// ********** END SCREEN ********** ///////////////////
+
+/////////////////// INT 08 /////////////////////////
+
+
+void qx11_state::tick_cb(int /*param*/)
+{
+     if (post_ready)
+            bios_tick_once();
+}
+
+
+
+void qx11_state::bios_tick_once()
+{
+    auto &space = m_maincpu->space(AS_PROGRAM);
+
+    u16 lo = space.read_word(0x046C);
+    u16 hi = space.read_word(0x046E);
+    u8  mf = space.read_byte(0x0470);
+
+    lo++; if (!lo) hi++;
+    if (hi > 0x0018 || (hi == 0x0018 && lo >= 0x00B0)) {
+        u32 t = (u32(hi) << 16) | lo;
+        t -= 0x001800B0u;
+        lo = u16(t);
+        hi = u16(t >> 16);
+        mf = 1;
+    }
+
+    
+    space.write_word(0x046C, lo);
+    space.write_word(0x046E, hi);
+    space.write_byte(0x0470, mf);
+    
+    //logerror("tick_clock\n");
+}
+
+
+/////////////////// INT 08 ENDS /////////////////////
 
 //////////////////// ********** MACHINE START and RESET ********** ///////////////////
 void qx11_state::machine_start()
 {
+
 
 m_fd20 = std::make_unique<fd20_epsp>();
 // m_cmdbuf.clear();
@@ -1068,15 +1323,38 @@ m_resleft = 0;
 
 ///////////////// END SERIAL PORT and RTC code /////
    
-    if (!m_qx11screen) fatalerror("Screen device not found\n");
+    if (!m_screen) fatalerror("Screen device not found\n");
 
     if (!m_maincpu) fatalerror("CPU device not found\n");
-   
 
-    address_space &io = m_maincpu->space(AS_IO); // <-- reference, do NOT copy    
+ 
+    
+
+    address_space &io = m_maincpu->space(AS_IO); // <-- reference, do NOT copy   
+    
+   address_space &prog = m_maincpu->space(AS_PROGRAM);
+
+    m_shadow_tap = prog.install_write_tap(
+        SHADOW_BASE, SHADOW_END, "qx11_shadow_spaces_only",
+        [this, &prog](offs_t byte_addr, u8 &data, u8 /*mask*/)
+        {
+            m_text_frame_dirty = true;
+
+            // char byte = even address; attr byte = odd
+            if (((byte_addr - SHADOW_BASE) & 1) != 0) return;
+
+            const offs_t cell = (byte_addr - SHADOW_BASE) >> 1;
+            const int row = int(cell / 80);
+            const int col = int(cell % 80);
+
+            const u8 ch = data;
+            if (ch == 0x20 || ch == 0x00)
+                clear_text_cell_bitmap(row, col);  // zero 8 scanlines in 0x9000
+        }
+    );
 
     // Add any noisy ports you want to ignore here
-    static const u16 kIgnore[] = { /* add more if needed */ };
+    static const u16 kIgnore[] = { 0x12,0x13/* add more if needed */ };
 
     auto ignore = [](u16 port)->bool {
         for (u16 p : kIgnore) if (p == port) return true;
@@ -1084,7 +1362,7 @@ m_resleft = 0;
     };
 
      m_io_tap = io.install_readwrite_tap(
-        0x0012, 0x13, "io_sniffer",
+        0x0000, 0xff, "io_sniffer",
         [this, ignore](offs_t off, u8 &data, u8) {
             u16 port = (u16)off;
             if (!ignore(port))
@@ -1098,11 +1376,19 @@ m_resleft = 0;
                          port, data, machine().describe_context());
         }
     );
+
+    // INT 08 timer at ~18.2065 Hz
+
+m_tick = timer_alloc(FUNC(qx11_state::tick_cb), this);
+m_tick->adjust(attotime::from_hz(18.20648), 0, attotime::from_hz(18.20648));    
+    // INT 08 Timer
      
 }
 
 void qx11_state::machine_reset()
 {
+    post_ready = false;
+
 // Reset observed latches
     m_ser_idx   = 0;
     m_brg_idx   = 0;
@@ -1135,7 +1421,6 @@ void qx11_state::mem_map(address_map &map)
 {
     // === RAM: 0x00000–0x7FFFF (512 KiB) ===
     map(0x00000, 0x07ffff).ram();  // Main RAM 512K (base QX11 model cam with 128Kb)
-
    
     //QX-11 Bios Map
     map(0xf0000, 0xfffff).rom().region("bios", 0x0000); // This is the BIOS.. even though the BIOS for QX11 is 32 KB, the BIOS is mirrored on F000 an F800
@@ -1143,13 +1428,14 @@ void qx11_state::mem_map(address_map &map)
 
 
     
-    map(0x0A0000, 0x0CFFFF).ram();
+    //map(0x0A0000, 0x0CFFFF).ram();
 
        // QX-11 Temporary framebuffer 
     map(0x080000, 0x08FFFF).ram().share("vram8000");  // Mapped to graphic VRAM native video mode  
     map(0x090000, 0x09FFFF).ram().share("vram9000");  // Mapped to Text (character drawing) native Video Mode
     map(0x00b04,0x01A9f).ram().share("textbuffer");   // This are is some kind of screen buffer.. It gets erased when issuing a CLS
-    
+    map(0xB8000,0xB8FFF).ram().share("vram_vga");
+    map(0xA0000,0xA0000).ram().share("vga_graphics_vram");
     // QX-11 framebuffer
 
 }
@@ -1176,11 +1462,12 @@ void qx11_state::io_map(address_map &map)
     
     map(0x7e, 0x7e).r(FUNC(qx11_state::status7e_r));
     map(0x80, 0x80).rw(m_postmux, FUNC(qx11_postmux_device::port80_r), FUNC(qx11_postmux_device::port80_w)); // Port 80,81,82 seem to be related to the hard drive.
-    map(0x81, 0x81).rw(m_postmux, FUNC(qx11_postmux_device::port81_r),
-                              FUNC(qx11_postmux_device::port81_w));
+    map(0x81, 0x81).rw(m_postmux, FUNC(qx11_postmux_device::port81_r), FUNC(qx11_postmux_device::port81_w));   // Port 81 & 82 seems to be the Hard Drive Controller
     map(0x82, 0x82).w (m_postmux, FUNC(qx11_postmux_device::port82_w));
     map(0x92, 0x92).rw(FUNC(qx11_state::port92_r),  FUNC(qx11_state::port92_w));
     map(0x93, 0x93).rw(FUNC(qx11_state::port93_r),  FUNC(qx11_state::port93_w));
+
+     //map(0x03D4, 0x03D5).w(FUNC(qx11_state::cga_seen_w)); // CGA CARD ICRTDRV.SYS
 
 }
 
@@ -1232,6 +1519,142 @@ void qx11_state::kbd_push_ascii(u8 ascii, u8 scancode /*=0*/)
     // if (m_pic) m_pic->ir1_w(1);
 }
 
+// --- BEGIN: QX-11 PC-compatible keyboard helpers (impl) ---
+
+// BDA helpers (0040:)
+static inline u8 rb_bda(address_space &sp, u32 off) { return sp.read_byte(0x400 + off); }
+static inline void wb_bda(address_space &sp, u32 off, u8 v) { sp.write_byte(0x400 + off, v); }
+
+// Push one key "word" to 0040:001E ring buffer (16 words, 32 bytes)
+void qx11_state::bios_kbd_enqueue(u8 ascii, u8 sc)
+{
+    address_space &sp = m_maincpu->space(AS_PROGRAM);
+
+    u8 head = rb_bda(sp, 0x1A);
+    u8 tail = rb_bda(sp, 0x1C);
+    u8 next = (u8)((head + 2) & 0x1F);  // wrap at 32
+
+    if (next == tail) {
+        // buffer full -> drop (or overwrite oldest by advancing tail)
+        return;
+    }
+
+    const u16 entry = (u16(sc) << 8) | ascii;     // [AL, AH]
+    const u16 off = 0x1E + head;
+    wb_bda(sp, off + 0, u8(entry & 0xFF));       // AL
+    wb_bda(sp, off + 1, u8(entry >> 8));         // AH
+    wb_bda(sp, 0x1A, next);                      // advance head
+
+    // If you raise a GA keyboard IRQ, do it here.
+}
+
+// 0x40:0x17 shift flags (PC/XT layout):
+// bit0=RightShift, bit1=LeftShift, bit2=Ctrl, bit3=Alt,
+// bit4=ScrollLock, bit5=NumLock, bit6=CapsLock, bit7=Insert (varies)
+void qx11_state::set_shift_flags(u8 mask, bool pressed)
+{
+    address_space &sp = m_maincpu->space(AS_PROGRAM);
+    u8 v = rb_bda(sp, 0x17);
+    v = pressed ? (v | mask) : (v & ~mask);
+    wb_bda(sp, 0x17, v);
+}
+
+// Map a few printables to XT Set-1 makes (US layout). Extend as needed.
+u8 qx11_state::ascii_to_set1(u8 ch)
+{
+    // Letters: case-insensitive to same scancode
+    if (ch >= 'A' && ch <= 'Z') ch = ch - 'A' + 'a';
+    switch (ch) {
+        // control keys (ASCII)
+        case 0x1B: return 0x01; // Esc
+        case 0x09: return 0x0F; // Tab
+        case 0x0D: return 0x1C; // Enter
+        case 0x08: return 0x0E; // Backspace
+        case ' ':  return 0x39; // Space
+        // digits
+        case '1': return 0x02; case '2': return 0x03; case '3': return 0x04; case '4': return 0x05;
+        case '5': return 0x06; case '6': return 0x07; case '7': return 0x08; case '8': return 0x09;
+        case '9': return 0x0A; case '0': return 0x0B;
+        // letters
+        case 'q': return 0x10; case 'w': return 0x11; case 'e': return 0x12; case 'r': return 0x13; case 't': return 0x14;
+        case 'y': return 0x15; case 'u': return 0x16; case 'i': return 0x17; case 'o': return 0x18; case 'p': return 0x19;
+        case 'a': return 0x1E; case 's': return 0x1F; case 'd': return 0x20; case 'f': return 0x21; case 'g': return 0x22;
+        case 'h': return 0x23; case 'j': return 0x24; case 'k': return 0x25; case 'l': return 0x26;
+        case 'z': return 0x2C; case 'x': return 0x2D; case 'c': return 0x2E; case 'v': return 0x2F; case 'b': return 0x30;
+        case 'n': return 0x31; case 'm': return 0x32;
+        // punctuation (common)
+        case '-': return 0x0C; case '=': return 0x0D; case '[': return 0x1A; case ']': return 0x1B; case '\\': return 0x2B;
+        case ';': return 0x27; case '\'': return 0x28; case ',': return 0x33; case '.': return 0x34; case '/': return 0x35;
+        case ':': return 0x28; case '|': return 0x2C; case '"': return 0x29;
+        default:  return 0x00;
+    }
+}
+
+// Called when a non-printable key changes (press/release). param = Set-1 scancode (or extended code).
+
+
+// Map Fn number (1..16) to the BIOS-style scan code we’ll put in AH.
+// F1..F10 = 3B..44, F11=85, F12=86, F13..F16=87..8A (common extendeds).
+static inline u8 fkey_scan(u8 fn) {
+    switch (fn) {
+        case  1: return 0x3B; case  2: return 0x3C; case  3: return 0x3D; case  4: return 0x3E; case  5: return 0x3F;
+        case  6: return 0x40; case  7: return 0x41; case  8: return 0x42; case  9: return 0x43; case 10: return 0x44;
+        case 11: return 0x85; case 12: return 0x86;
+        case 13: return 0x87; case 14: return 0x88; case 15: return 0x89; case 16: return 0x8A;
+        default: return 0x00;
+    }
+}
+
+// INPUT_CHANGED for non-printables (arrows/F-keys, etc.)
+// param = Set-1 scancode; newval!=0 => make, newval==0 => break
+
+INPUT_CHANGED_MEMBER(qx11_state::key_makebreak_changed)
+{
+    const bool pressed = (newval != 0);
+    const u8 sc = u8(param);
+
+    if (pressed) {
+        // Non-printables: AL=0, AH=scancode
+        //bios_kbd_enqueue(0x00, sc);
+        kbd_push_ascii(0x00,sc);
+    } else {
+        // Breaks are often ignored, but emitting make|80h helps some apps
+        kbd_push_ascii(0x00,sc | 0x80);
+        //bios_kbd_enqueue(0x00, sc | 0x80);
+    }
+}
+
+// INPUT_CHANGED for modifiers (Shift/Ctrl/Alt…and locks if you want)
+// param = bit mask in 0x40:0x17 to set/clear
+INPUT_CHANGED_MEMBER(qx11_state::mod_changed)
+{
+    const bool pressed = (newval != 0);
+    set_shift_flags(u8(param), pressed);
+}
+
+// --- END: QX-11 PC-compatible keyboard helpers (impl) ---
+
+
+void qx11_state::kbd_put(u8 ascii)
+{
+    // 1) Keep your existing GA path if you have one
+    //    (e.g., push to GA FIFO / raise GA IRQ)
+
+    // 2) PC-compatible path: also push to BDA ring
+    const u8 sc = ascii_to_set1(ascii);
+    if (sc) {
+        // printable keys: AL=ASCII, AH=make scancode
+        kbd_push_ascii(ascii,sc);
+        //bios_kbd_enqueue(ascii, sc);
+    } else {
+        // If it's a control not covered above, you can special-case it here.
+        // (Most GENERIC_KEYBOARD delivery will land in ascii_to_set1 anyway.)
+    }
+}
+ 
+
+ /*
+/// OLD KEYBOARD
 void qx11_state::kbd_put(u8 ascii)
 {
  // Minimal: map LF->CR for COMMAND.COM
@@ -1239,7 +1662,7 @@ void qx11_state::kbd_put(u8 ascii)
     //printf("key: %04X",ascii);
     kbd_push_ascii(ascii, 0); // fill real scancode later if needed
 }
-
+ */
 u8 qx11_state::kb_status_r()
 {
     // bit0: data ready; bit1: tx ready (always 1 unless you implement command channel)
@@ -1276,6 +1699,8 @@ INPUT_CHANGED_MEMBER(qx11_state::key_up_changed)    { if (newval) kbd_push_ascii
 INPUT_CHANGED_MEMBER(qx11_state::key_down_changed)  { if (newval) kbd_push_ascii(0x00, 0x50);  }
 INPUT_CHANGED_MEMBER(qx11_state::key_left_changed)  { if (newval) kbd_push_ascii(0x00, 0x4B);  }
 INPUT_CHANGED_MEMBER(qx11_state::key_right_changed) { if (newval) kbd_push_ascii(0x00, 0x4D);  }
+INPUT_CHANGED_MEMBER(qx11_state::key_f9_changed)    { if (newval) kbd_push_ascii(0x00, 0x43);  }
+
 
 static INPUT_PORTS_START(qx11)
     PORT_START("EXTK")
@@ -1287,7 +1712,11 @@ static INPUT_PORTS_START(qx11)
         PORT_CODE(KEYCODE_LEFT)  PORT_CHANGED_MEMBER(DEVICE_SELF, FUNC(qx11_state::key_left_changed), 0)
     PORT_BIT(0x0008, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_NAME("Right")
         PORT_CODE(KEYCODE_RIGHT) PORT_CHANGED_MEMBER(DEVICE_SELF, FUNC(qx11_state::key_right_changed), 0)
+    //PORT_BIT(0x0011, IP_ACTIVE_HIGH, IPT_KEYBOARD) PORT_NAME("F9")
+     //   PORT_CODE(KEYCODE_F9) PORT_CHANGED_MEMBER(DEVICE_SELF, FUNC(qx11_state::key_f9_changed), 0)
 INPUT_PORTS_END
+   
+    
 
 ioport_constructor qx11_state::device_input_ports() const
 {
@@ -1304,6 +1733,7 @@ static void qx11_floppies(device_slot_interface &device)
 }
 ////////////////////// ********** MACHINE CONFIGURATION ********** ///////////////////
 
+
 void qx11_state::qx11(machine_config &config)
 {
     I8088(config, m_maincpu, 4'772'000);
@@ -1317,14 +1747,17 @@ void qx11_state::qx11(machine_config &config)
 	m_pic_s->out_int_callback().set_inputline(m_maincpu, 0);
 
     // QX-11 Framebuffer 
-    SCREEN(config, m_qx11screen, SCREEN_TYPE_RASTER);
+    SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
+    //PALETTE(config, m_palette, 2).set_init(FUNC(qx11_state::qx11_palette_init));
 
     //m_qx11screen->set_raw(12'000'000, 800, 0, 640, 262, 0, 200);
-    m_qx11screen->set_refresh_hz(60);
-    m_qx11screen->set_size(640, 400);
-    m_qx11screen->set_visarea(0, 640-1, 0, 400-1);
-    m_qx11screen->set_screen_update(FUNC(qx11_state::screen_update_qx11));
-    //m_qx11screen->set_palette(m_palette);  
+    m_screen->set_refresh_hz(60);
+    m_screen->set_size(640, 400);
+    m_screen->set_visarea(0, 640-1, 0, 400-1);
+    m_screen->set_raw(14.318181_MHz_XTAL / 2, 912, 0, 640, 262, 0, 400);
+    m_screen->set_screen_update(FUNC(qx11_state::screen_update_qx11));
+
+    //m_screen->set_palette(m_palette);  
 
     // SOUND
     SPEAKER(config, "mono").front_center();
@@ -1341,6 +1774,10 @@ void qx11_state::qx11(machine_config &config)
     m_fdc->intrq_wr_callback().set(FUNC(qx11_state::fdc_intrq_w)); /// There is a GAVNIT that may be used for Interrupt handling, but we don't have any documentation about it
     //m_fdc->drq_wr_callback().set_inputline(m_maincpu, INPUT_LINE_HALT).invert(); // drq is active low
 
+
+    // QX10 Keyboard 
+    //EPSON_QX_KEYBOARD_PORT(config, m_epkbd, bus::epson_qx::keyboard::keyboard_devices, "qx10_ascii");
+	//m_kbd->txd_handler().set(m_scc, FUNC(upd7201_device::rxa_w));
     // Keyboard
     GENERIC_KEYBOARD(config, m_kbd, 0);
     m_kbd->set_keyboard_callback(FUNC(qx11_state::kbd_put));
@@ -1354,6 +1791,15 @@ void qx11_state::qx11(machine_config &config)
     // One of the Gate Array variants (not reverse-engineered yet)
     QX11_POSTMUX(config, m_postmux, 0);
 
+  // -------------- CPU stays as you already have it --------------
+
+// --- Minimal internal ISA8 bus to host CGA ---
+
+ISA8(config, m_isabus, 0);
+m_isabus->set_memspace(m_maincpu, AS_PROGRAM);
+m_isabus->set_iospace(m_maincpu,  AS_IO);
+
+ISA8_SLOT(config, "isa1", 0, m_isabus, pc_isa8_cards, "cga_mc1502", false);
  
 } 
 
@@ -1364,6 +1810,7 @@ u8 qx11_state::status7e_r()
     // Return a stable value; BIOS reads twice and compares.
     // Keep 0xFF unless you later discover bit meanings (DIPs, ready, etc).
     //logerror("IN  7E -> %02X\n", m_status7e);
+    post_ready = true;
     return m_status7e;
 }
 
@@ -1412,6 +1859,7 @@ inline bool qx11_state::drive_has_disk(int drv) {
 void qx11_state::floppy_motor_w(uint8_t state) // Probably the GAFDDC listening to port 0x0F
 {
     u8 drive_index = 0xFF;
+    
 
     // Before accessing the drive the BIOS resets the upd765 and writes to port 0x0F 
 
@@ -1442,14 +1890,15 @@ void qx11_state::floppy_motor_w(uint8_t state) // Probably the GAFDDC listening 
       
         auto *floppy = m_floppy[drive_index]->get_device();
         if (floppy) {
-            logerror("Write to Port 0xF0 - Value %02X, FLOPPY Drive %d selected\n", state,drive_index);
+            logerror("Write to Port 0x0F - Value %02X, FLOPPY Drive %d selected\n", state,drive_index);
             m_fdc->set_floppy(floppy);  // Select the Floppy
             floppy->mon_w(0);           // Turn the floopy motor on
-
             
             
+    
             floppy->set_rpm(300); // typical 5.25" RPM
             m_fdc->set_rate(250000); // 250 kHz
+            
 
             
             
@@ -1457,7 +1906,7 @@ void qx11_state::floppy_motor_w(uint8_t state) // Probably the GAFDDC listening 
         } 
     }
 
-    logerror("Write to port 0xF0 - Value  -> %02X\n", state);
+    logerror("Write to port 0x0F - Value  -> %02X\n", state);
     
 }
 
@@ -1558,6 +2007,8 @@ ROM_START(qx11)
     ROM_REGION(0x10000, "rom2", 0)
     ROM_LOAD("MBM27256@DIP28_EPSON_ABACUS_M25140CA.BIN", 0x00000, 0x10000, CRC(eb6329ec) SHA1(55d0ec5f6ffa680dc2d50623e8645bb50a6c263b))
     
+    ROM_REGION(0x800, "extfont", 0) // 2048 bytes = 256*8
+    ROM_LOAD("qx11_font_8x8.bin", 0x000, 0x800, CRC(00000000) SHA1(0000000000000000000000000000000000000000))
 ROM_END
 
 COMP(1983, qx11, 0, 0, qx11, qx11, qx11_state, empty_init, "Epson", "QX-11 (skeleton, 512K)", MACHINE_NOT_WORKING)
