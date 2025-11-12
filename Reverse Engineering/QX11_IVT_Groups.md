@@ -31,7 +31,7 @@
 | 1Fh | `F656:15B8` | Graphics character table pointer. |
 | 70h | `F107:0500` | Stub placeholder. |
 | **71h** | `F107:37CD` | **Gate-Array shared interrupt (timer/FDC/etc.).** |
-| 75h | `F107:1D32` | 8087/aux stub (not used). |
+| 75h | `F107:1D32` | Keyboard Interrupt Handler |
 | 77h | `F107:3BF5` | BIOS dispatcher entry. |
 | 79h | `F107:3BBF` | BIOS dispatcher entry. |
 | 7Ch | `F107:3BDA` | BIOS dispatcher entry. |
