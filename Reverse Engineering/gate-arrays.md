@@ -395,10 +395,3 @@ The last remaining GA (GAVNMR) appears to be purely for memory refresh and is no
 The **GAVDP** and **GAVNIT** continue to be active areas of reverse engineering as we decode more of their internal logic, register interactions, and timing systems.
 
 ---
-
-If you want, I can also generate:
-
-✔ `docs/gavnit.md`  
-✔ `docs/vram-windowing.md`  
-✔ `docs/floppy-subsystem.md`  
-✔ SVG diagrams for all blocks  
