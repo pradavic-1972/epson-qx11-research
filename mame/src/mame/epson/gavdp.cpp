@@ -234,53 +234,53 @@ void epson_gavdp_device::vram_w(offs_t offset, u8 data)
     // Write to VRAM
     m_cols[idx] = data;
 
-    // --------------------------------------------------------------------
-    // PROOF OF CONCEPT:
-    // If BIOS writes to the *first column* of a text row (col 0, scan 0),
-    // immediately clear that entire text row in VRAM (all columns, 16 scans).
-    // --------------------------------------------------------------------
-    {
-        const u32 col      = rel / m_col_stride;            // 0..m_char_cols-1
-        const u32 col_off  = rel % m_col_stride;            // 0..(m_col_stride-1)
+    // // --------------------------------------------------------------------
+    // // PROOF OF CONCEPT:
+    // // If BIOS writes to the *first column* of a text row (col 0, scan 0),
+    // // immediately clear that entire text row in VRAM (all columns, 16 scans).
+    // // --------------------------------------------------------------------
+    // {
+    //     const u32 col      = rel / m_col_stride;            // 0..m_char_cols-1
+    //     const u32 col_off  = rel % m_col_stride;            // 0..(m_col_stride-1)
 
-        const bool bottom      = (col_off >= m_bottom_off); // top/bottom half
-        const u32 within_half  = bottom ? (col_off - m_bottom_off) : col_off;
+    //     const bool bottom      = (col_off >= m_bottom_off); // top/bottom half
+    //     const u32 within_half  = bottom ? (col_off - m_bottom_off) : col_off;
 
-        const int crow = int(within_half >> 4);             // 16 bytes per text row
-        const int scan = int(within_half & 0x0F);           // 0..15
+    //     const int crow = int(within_half >> 4);             // 16 bytes per text row
+    //     const int scan = int(within_half & 0x0F);           // 0..15
 
-        // Split 25 rows as 12 top + 13 bottom in mode 7 text
-        constexpr int TOP_ROWS = 12;
-        int logical_row = 0;
-        if (!bottom)
-            logical_row = crow;              // 0..11
-        else
-            logical_row = TOP_ROWS + crow;   // 12..24
+    //     // Split 25 rows as 12 top + 13 bottom in mode 7 text
+    //     constexpr int TOP_ROWS = 12;
+    //     int logical_row = 0;
+    //     if (!bottom)
+    //         logical_row = crow;              // 0..11
+    //     else
+    //         logical_row = TOP_ROWS + crow;   // 12..24
 
-        if (logical_row >= 0 && logical_row < TEXT_ROWS)
-        {
-            // "Column 1 in that row" → col 0, scan 0
-            if (col == 0 && scan == 0)
-            {
-                const u32 tracked = u32(m_char_cols) * m_col_stride;
-                const u32 half_base = bottom ? m_bottom_off : 0x000;
-                const u32 row_base  = half_base + u32(crow) * 0x10u;
+    //     if (logical_row >= 0 && logical_row < TEXT_ROWS)
+    //     {
+    //         // "Column 1 in that row" → col 0, scan 0
+    //         if (col == 0 && scan == 0)
+    //         {
+    //             const u32 tracked = u32(m_char_cols) * m_col_stride;
+    //             const u32 half_base = bottom ? m_bottom_off : 0x000;
+    //             const u32 row_base  = half_base + u32(crow) * 0x10u;
 
-                // Zero this row across all columns and all 16 scanlines
-                for (int c = 0; c < m_char_cols; ++c)
-                {
-                    const u32 col_base = u32(c) * m_col_stride;
-                    for (int s = 0; s < 16; ++s)
-                    {
-                        const u32 a_off = row_base + u32(s);
-                        const u32 li    = col_base + a_off;
-                        if (li < tracked)
-                            m_cols[li] = 0x00;
-                    }
-                }
-            }
-        }
-    }
+    //             // Zero this row across all columns and all 16 scanlines
+    //             for (int c = 0; c < m_char_cols; ++c)
+    //             {
+    //                 const u32 col_base = u32(c) * m_col_stride;
+    //                 for (int s = 0; s < 16; ++s)
+    //                 {
+    //                     const u32 a_off = row_base + u32(s);
+    //                     const u32 li    = col_base + a_off;
+    //                     if (li < tracked)
+    //                         m_cols[li] = 0x00;
+    //                 }
+    //             }
+    //         }
+    //     }
+    // }
 
     // In HR mono mode we do NOT maintain a per-cell attribute plane;
     // BIOS performs highlight by manipulating glyph bits directly.
@@ -313,7 +313,7 @@ u32 epson_gavdp_device::screen_update(screen_device& screen, bitmap_rgb32& bitma
     return 0;
 }
 
-void epson_gavdp_device::render_mode7(bitmap_rgb32& bmp)
+void epson_gavdp_device::render_mode7(bitmap_rgb32 &bmp)
 {
     const int W = std::min(m_logical_w, bmp.width());
     const int H = std::min(m_logical_h, bmp.height());
