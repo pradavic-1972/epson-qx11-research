@@ -1,102 +1,178 @@
 // license:BSD-3-Clause
-// Epson QX-11 GAVDP — Gate Array Video Data Path / Processor
-// Mode 7: column-centric 1bpp (8 horiz pixels per byte, MSB-first),
-// per-column stride 0x200, bottom-half offset 0x100, split at 200 lines.
+// Epson QX-11 GAVDP (Video Processor / Gate Array)
+
+#ifndef MAME_EPSON_GAVDP_H
+#define MAME_EPSON_GAVDP_H
 
 #pragma once
 
-#include "device.h"
-#include "screen.h"
 #include "emupal.h"
-#include <array>
+#include "screen.h"
+#include "device.h"
 
-class epson_gavdp_device : public device_t, public device_video_interface
+// ============================================================================
+//  Device type
+// ============================================================================
+
+DECLARE_DEVICE_TYPE(EPSON_GAVDP, gavdp_device)
+
+// ============================================================================
+//  GAVDP device
+// ============================================================================
+//
+//  - Column-centric VRAM
+//  - Per-column layout (512 bytes):
+//        0x0000–0x00C7 : visible rows 0–199  (top half)
+//        0x00C8–0x00FF : gap (unused)
+//        0x0100–0x01C7 : visible rows 200–399 (bottom half, mono only)
+//        0x01C8–0x01FF : gap (unused)
+//  - Monochrome: 640×400 uses both halves
+//  - Color:      640×200 uses only 0x0000–0x00C7 (top half), bottom is 0
+//  - C663 is a vertical scroll index (pixels), applied as a simple ring:
+//        mono : (y + C663) % 400
+//        color: (y + C663) % 200
+//  - 8D068 (machine profile):
+//        0x02 → mono 640×400
+//        0x07 → color 640×200
+//        bit7 is used as a clear/scroll engine flag.
+//  - 8D269 (attribute) is used only in color mode as a global fg/bg color.
+//
+
+class gavdp_device :
+	public device_t,
+	public device_video_interface
 {
 public:
-    // Full VRAM window we expose to the CPU (0x80000..0x8FFFF typically)
-    static constexpr u32 VRAM_BYTES = 0x10000;
+	// --------------------------------------------------------------------
+	//  Construction
+	// --------------------------------------------------------------------
+	gavdp_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-    // Default geometry
-    static constexpr int  DEF_WIDTH  = 640;
-    static constexpr int  DEF_HEIGHT = 400;
-    static constexpr int  DEF_SPLIT  = 200;    // top 200, bottom 200
+	// Map GAVDP window into the main CPU address space at `base`.
+	// This installs a full 64 KiB segment (0x0000–0xFFFF) backed by m_vram.
+	void install_vram_window(address_space &space, u32 base);
 
-    // Column-centric layout
-    static constexpr u32  DEF_COL_STRIDE   = 0x200; // bytes per 8-pixel character column
-    static constexpr u32  DEF_BOTTOM_OFF   = 0x100; // bottom-half offset within column
-    static constexpr int  DEF_CHAR_COLUMNS = 128;   // track up to 128 columns
+	// Raw VRAM access (for debugging / logs)
+	u8  vram_r(offs_t offset);
+	void vram_w(offs_t offset, u8 data);
 
-    // Attribute grid (40/80 columns × up to 400/8 = 50 rows)
-    static constexpr int  ATTR_ROWS  = 50;
-    static constexpr int  ATTR_COLS  = 128;
-
-    // Logical text rows we care about in mode 7 text
-    static constexpr int  TEXT_ROWS  = 25;
-
-    epson_gavdp_device(const machine_config& mconfig, const char* tag, device_t* owner, u32 clock = 0);
-
-    // Install VRAM window at CPU physical base (e.g., 0x80000)
-    void install_vram_window(address_space &space, offs_t base);
-
-    // 8-bit handlers
-    u8  vram_r(offs_t offset);
-    void vram_w(offs_t offset, u8 data);
-
-    // Video callback (bound from qx11.cpp)
-    u32 screen_update(screen_device& screen, bitmap_rgb32& bitmap, const rectangle& cliprect);
+	// Screen update callback
+	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 protected:
-    void device_add_mconfig(machine_config &config) override;
-    void device_start() override;
-    void device_reset() override;
+	// device_t
+	virtual void device_start() override;
+	virtual void device_reset() override;
+	virtual void device_add_mconfig(machine_config &config) override;
 
 private:
-    void palette_init(palette_device &palette);
-    u32  linear_index_from_rel(u32 rel) const;
-    void render_mode7(bitmap_rgb32& bmp);
-    void update_geometry_from_bios();
-    void update_color_profile_from_ga();
+	// --------------------------------------------------------------------
+	//  Internal constants / layout
+	// --------------------------------------------------------------------
 
-    // Map VRAM offset → approximate screen Y (0..399), returns false if out of range
-    bool rel_to_screen_y(u32 rel, int &y) const;
+	// Bitmap plane: 80 columns × 0x200 bytes = 0xA000, but we leave some headroom.
+	static constexpr int VRAM_COLS           = 80;
+	static constexpr int VRAM_BYTES_PER_COL  = 0x200;
+	static constexpr int VRAM_PLANE_SIZE     = VRAM_COLS * VRAM_BYTES_PER_COL; // 0xA000
 
-    // Read GA scroll index mirror at C663 (scanline offset)
-    u8 get_scroll_scanlines() const;
+	// CPU-visible GAVDP window: full 64 KiB segment (0x0000–0xFFFF)
+	static constexpr int VRAM_WINDOW_SIZE    = 0x10000;
 
-    // Base address where VRAM window is installed
-    offs_t m_window_base = 0;
+	// GAVDP "register" mirrors in VRAM
+	static constexpr offs_t REG_C060_OFFSET  = 0x0C060;
+	static constexpr offs_t REG_C261_OFFSET  = 0x0C261;
+	static constexpr offs_t REG_C462_OFFSET  = 0x0C462;
+	static constexpr offs_t REG_C663_OFFSET  = 0x0C663;
+	static constexpr offs_t REG_D068_OFFSET  = 0x0D068;
+	static constexpr offs_t REG_D269_OFFSET  = 0x0D269;
+	static constexpr offs_t REG_D46A_OFFSET  = 0x0D46A;
+	static constexpr offs_t REG_C864_OFFSET  = 0x0C864;
+	static constexpr offs_t REG_CA65_OFFSET  = 0x0CA65;
+	static constexpr offs_t REG_CC66_OFFSET  = 0x0CC66;
+	static constexpr offs_t REG_CE67_OFFSET  = 0x0CE67;
 
-    // Geometry / split
-    int    m_vis_w = DEF_WIDTH;
-    int    m_vis_h = DEF_HEIGHT;
-    int    m_split = DEF_SPLIT;
+	// --------------------------------------------------------------------
+	//  Subdevices
+	// --------------------------------------------------------------------
 
-    // Layout
-    u32    m_col_stride = DEF_COL_STRIDE;   // 0x200
-    u32    m_bottom_off = DEF_BOTTOM_OFF;   // 0x100
-    int    m_char_cols  = DEF_CHAR_COLUMNS; // 128 columns tracked
+	// The GAVDP owns its own screen.
+	required_device<screen_device> m_screen;
 
-    // Logical resolution reported by BIOS (BDA)
-    int    m_logical_w = 640;
-    int    m_logical_h = 400;
+	// --------------------------------------------------------------------
+	//  VRAM and mapping
+	// --------------------------------------------------------------------
 
-    u16    m_last_maxx = 0xffff;
-    u16    m_last_maxy = 0xffff;
+	// Full 64 KiB GAVDP window as seen by the CPU (0x0000–0xFFFF).
+	// Bitmap data lives in [0x0000..0xBFFF]. The rest (0xC000–0xFFFF)
+	// is used by BIOS as control/mirror area (e.g., 0xD068, 0xD269).
+	std::vector<u8> m_vram;
 
-    // Scroll mirror (we still read actual value from VRAM at C663)
-    u8     m_c663_scroll = 0;
+	// Base address where the window is installed in the CPU program space.
+	u32             m_vram_base = 0;
+	address_space  *m_cpu_space = nullptr;
 
-    // Compact VRAM: [column][stride]
-    std::unique_ptr<u8[]> m_cols;
+	// --------------------------------------------------------------------
+	//  Video state mirrors
+	// --------------------------------------------------------------------
 
-    // Per-cell attribute memory: ATTR_ROWS x ATTR_COLS
-    std::array<u8, ATTR_ROWS * ATTR_COLS> m_attr{};
-    u8  m_latched_attr     = 0x07;   // last value written to 8D269 (GA control latch)
-    u8  m_machine_profile  = 0x02;   // mirror of 8D068 (2=HR mono, 7=color RGB)
-    bool m_color_mode      = false;  // true for color RGB monitor, false for HR mono
+	bool m_color_mode        = false; // false: mono 640×400, true: color 640×200
+	bool m_scroll_mode       = false; // true: this clear pass is a scroll (C663 written)
+	bool m_clear_scroll_mode = false; // true: D068 bit7 is set (clear/scroll engine active)
+	bool m_app_clear         = false; // (unused right now, reserved)
 
-    required_device<screen_device>  m_screen;
-    required_device<palette_device> m_palette;
+	int  m_visible_height    = 400;   // scanlines visible: 400 or 200
+	int  m_visible_cols      = 80;    // always 80 logical character columns
+	int  m_visible_width     = 640;   // m_visible_cols * 8
+
+	int  m_d068_last         = 0;     // last value written to D068 (profile/engine)
+
+	// Erase tracking (while D068 bit7 is set)
+	bool m_erase_tracking    = false;
+	u32  m_erase_min         = 0;     // smallest offset zeroed (unused in current heuristic)
+	u32  m_erase_max         = 0;     // largest offset zeroed (unused)
+	u32  m_erase_count       = 0;     // how many zero writes this pass
+	u8   m_erase_min_low     = 0xff;  // min (offset & 0xFF) (unused)
+	u8   m_erase_max_low     = 0x00;  // max (offset & 0xFF) (unused)
+
+	// Scroll clear logging: per-column band info
+	u8   m_col_used[VRAM_COLS];       // 1 if this column saw any zero writes in this pass
+	u16  m_col_min_idx[VRAM_COLS];    // min idx (0..0x1FF) zeroed in this col
+	u16  m_col_max_idx[VRAM_COLS];    // max idx (0..0x1FF) zeroed in this col
+
+	// Snapshots of scroll-related regs for logging
+	u8   m_reg_c663 = 0;              // last written C663
+	u8   m_reg_c462 = 0;              // last written C462
+
+	// 8-color RGB palette for color mode
+	rgb_t m_palette[8];
+
+	// --------------------------------------------------------------------
+	//  Helpers
+	// --------------------------------------------------------------------
+
+	void init_palette();
+
+	// Read machine profile (D068) and decide:
+	//  - mono vs color
+	//  - 640×400 vs 640×200
+	void update_geometry_from_profile();
+
+	// Address helpers
+	inline u8  vram_byte(u32 offset) const;
+	inline u8 &vram_byte_ref(u32 offset);
+
+	// Core rendering entry
+	void render_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+
+	// Mode-specific rendering
+	void render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	void render_mode_color(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+
+	// CLS helper
+	void clear_text_vram();
+	void clear_scroll_bottom_band_for_columns();
+	void clear_window_from_ga();      
+
 };
 
-DECLARE_DEVICE_TYPE(EPSON_GAVDP, epson_gavdp_device)
+#endif // MAME_EPSON_GAVDP_H

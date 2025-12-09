@@ -351,7 +351,38 @@ u8 epson_gavnio_device::data_r()
     
 
     logerror("GAVNIO: data_r -> %02X (rx_count=%d)\n", data, m_rx_count);
-    return data;
+
+    switch (data)
+    {
+
+    case 0xC0 ... 0xCF:
+        break;
+
+    case 0xBB:
+        return 0x76;
+        break;
+
+    case 0xDB:
+        return 0x6D;
+        break;
+
+    case 0xe7:
+        return 0x77;
+        break;
+
+     case 0xEE:
+        return 0x74;
+        break;
+
+     case 0x09:
+        return 0x0B;
+        break;
+    
+    default:
+        return data;
+        break;
+    }
+    //return data;
 }
 
 void epson_gavnio_device::data_w(u8 data)

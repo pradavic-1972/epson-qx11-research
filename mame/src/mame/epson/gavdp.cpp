@@ -1,443 +1,755 @@
 // license:BSD-3-Clause
-// Epson QX-11 GAVDP — Gate Array Video Data Path / Processor
-// Mode 7: column-centric 1bpp with 0x200 column stride and 0x100 bottom-half offset.
+// Epson QX-11 GAVDP (Video Processor / Gate Array)
 
 #include "emu.h"
 #include "gavdp.h"
 
-DEFINE_DEVICE_TYPE(EPSON_GAVDP, epson_gavdp_device, "epson_gavdp", "Epson QX-11 GAVDP (Video Processor)")
+DEFINE_DEVICE_TYPE(EPSON_GAVDP, gavdp_device, "epson_gavdp", "Epson QX-11 GAVDP")
 
-epson_gavdp_device::epson_gavdp_device(const machine_config& mconfig, const char* tag, device_t* owner, u32 clock)
-    : device_t(mconfig, EPSON_GAVDP, tag, owner, clock)
-    , device_video_interface(mconfig, *this)
-    , m_screen(*this, "screen")
-    , m_palette(*this, "palette")
+// ============================================================================
+//  Construction
+// ============================================================================
+
+gavdp_device::gavdp_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
+	: device_t(mconfig, EPSON_GAVDP, tag, owner, clock)
+	, device_video_interface(mconfig, *this)
+	, m_screen(*this, "screen")
 {
 }
 
-void epson_gavdp_device::device_start()
+// ============================================================================
+//  device_t
+// ============================================================================
+
+void gavdp_device::device_start()
 {
-    // Allocate full VRAM window: 128 columns * 0x200 stride = 0x10000 bytes
-    const u32 bytes = u32(m_char_cols) * m_col_stride;
-    m_cols = std::make_unique<u8[]>(bytes);
-    std::fill_n(m_cols.get(), bytes, 0x00);
+	// Full GAVDP VRAM window
+	m_vram.resize(VRAM_WINDOW_SIZE);
+	std::fill(m_vram.begin(), m_vram.end(), 0);
 
-    // Default attributes: all cells normal white-on-black
-    m_attr.fill(0x07);
-    m_latched_attr    = 0x07;
-    m_machine_profile = 0x02;
-    m_color_mode      = false;
-    m_c663_scroll     = 0;
+	save_item(NAME(m_vram));
+	save_item(NAME(m_vram_base));
+	save_item(NAME(m_color_mode));
+	save_item(NAME(m_visible_width));
+	save_item(NAME(m_visible_height));
+	save_item(NAME(m_visible_cols));
 
-    // Save-state
-    save_pointer(NAME(m_cols), bytes);
-    save_item(NAME(m_window_base));
-    save_item(NAME(m_vis_w));
-    save_item(NAME(m_vis_h));
-    save_item(NAME(m_split));
-    save_item(NAME(m_col_stride));
-    save_item(NAME(m_bottom_off));
-    save_item(NAME(m_char_cols));
-    save_item(NAME(m_logical_w));
-    save_item(NAME(m_logical_h));
-    save_item(NAME(m_last_maxx));
-    save_item(NAME(m_last_maxy));
-    save_item(NAME(m_c663_scroll));
-    save_item(NAME(m_attr));
-    save_item(NAME(m_latched_attr));
-    save_item(NAME(m_machine_profile));
-    save_item(NAME(m_color_mode));
+	// State for CLS/scroll detection
+	save_item(NAME(m_d068_last));
+	save_item(NAME(m_clear_scroll_mode));
+	save_item(NAME(m_scroll_mode));
+
+	// Erase tracking
+	save_item(NAME(m_erase_tracking));
+	save_item(NAME(m_erase_min));
+	save_item(NAME(m_erase_max));
+	save_item(NAME(m_erase_count));
+	save_item(NAME(m_erase_min_low));
+	save_item(NAME(m_erase_max_low));
+
+	// Scroll clear logging
+	save_item(NAME(m_col_used));
+	save_item(NAME(m_col_min_idx));
+	save_item(NAME(m_col_max_idx));
+	save_item(NAME(m_reg_c663));
+	save_item(NAME(m_reg_c462));
+
+	init_palette();
+
+	// Default: hi-res mono 640x400
+	m_color_mode     = false;
+	m_visible_cols   = 80;
+	m_visible_width  = 640;
+	m_visible_height = 400;
+
+	m_cpu_space          = nullptr;
+	m_d068_last          = 0x00;
+	m_clear_scroll_mode  = false;
+	m_scroll_mode        = false;
+
+	m_erase_tracking = false;
+	m_erase_min      = 0;
+	m_erase_max      = 0;
+	m_erase_count    = 0;
+	m_erase_min_low  = 0xff;
+	m_erase_max_low  = 0x00;
+
+	for (int col = 0; col < VRAM_COLS; ++col)
+	{
+		m_col_used[col]    = 0;
+		m_col_min_idx[col] = 0xffff;
+		m_col_max_idx[col] = 0x0000;
+	}
+
+	m_reg_c663 = 0;
+	m_reg_c462 = 0;
 }
 
-void epson_gavdp_device::device_reset()
+void gavdp_device::device_reset()
 {
-    // Leave VRAM as-is; BIOS will reinitialize, but keep attributes reasonable
-    m_latched_attr = 0x07;
-    m_c663_scroll  = 0;
-    update_color_profile_from_ga();
+	// BIOS will rewrite D068; geometry is re-sampled each frame.
 }
 
-void epson_gavdp_device::palette_init(palette_device &palette)
+void gavdp_device::device_add_mconfig(machine_config &config)
 {
-    // 8-color RGB palette (3-bit RGB: R,G,B)
-    // Index: (R<<2)|(G<<1)|B
-    palette.set_pen_color(0, rgb_t(0x00, 0x00, 0x00)); // 0: black
-    palette.set_pen_color(1, rgb_t(0x00, 0x00, 0xFF)); // 1: blue
-    palette.set_pen_color(2, rgb_t(0x00, 0xFF, 0x00)); // 2: green
-    palette.set_pen_color(3, rgb_t(0x00, 0xFF, 0xFF)); // 3: cyan
-    palette.set_pen_color(4, rgb_t(0xFF, 0x00, 0x00)); // 4: red
-    palette.set_pen_color(5, rgb_t(0xFF, 0x00, 0xFF)); // 5: magenta
-    palette.set_pen_color(6, rgb_t(0xFF, 0xFF, 0x00)); // 6: yellow
-    palette.set_pen_color(7, rgb_t(0xFF, 0xFF, 0xFF)); // 7: white
+	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
+
+	// Nominal timing; visible area adjusted at runtime.
+	m_screen->set_raw(14'318'180, 912, 0, 640, 449, 0, 400);
+	m_screen->set_screen_update(*this, FUNC(gavdp_device::screen_update));
 }
 
-void epson_gavdp_device::device_add_mconfig(machine_config &config)
-{
-    SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
-    m_screen->set_raw(12'000'000, 800, 0, 640, 525, 0, 400);
-    m_screen->set_screen_update(FUNC(epson_gavdp_device::screen_update));
-    m_screen->set_palette(m_palette);
+// ============================================================================
+//  Public API
+// ============================================================================
 
-    PALETTE(config, m_palette, FUNC(epson_gavdp_device::palette_init), 8);
+void gavdp_device::install_vram_window(address_space &space, u32 base)
+{
+	m_cpu_space = &space;
+	m_vram_base = base;
+
+	space.install_readwrite_handler(
+		base,
+		base + VRAM_WINDOW_SIZE - 1,
+		read8sm_delegate(*this, FUNC(gavdp_device::vram_r)),
+		write8sm_delegate(*this, FUNC(gavdp_device::vram_w)));
 }
 
-void epson_gavdp_device::update_geometry_from_bios()
+u8 gavdp_device::vram_r(offs_t offset)
 {
-    cpu_device *cpu = machine().device<cpu_device>("maincpu");
-    if (!cpu)
-        return;
-
-    address_space &space = cpu->space(AS_PROGRAM);
-
-    u16 maxx = space.read_byte(0x0855) | (u16(space.read_byte(0x0856)) << 8);
-    u16 maxy = space.read_byte(0x0857) | (u16(space.read_byte(0x0858)) << 8);
-
-    if (maxx == m_last_maxx && maxy == m_last_maxy)
-        return;
-
-    m_last_maxx = maxx;
-    m_last_maxy = maxy;
-
-    u16 vis_maxx = std::min<u16>(maxx, DEF_WIDTH  - 1);  // 639
-    u16 vis_maxy = std::min<u16>(maxy, DEF_HEIGHT - 1);  // 399
-
-    m_logical_w = int(vis_maxx) + 1;
-    m_logical_h = int(vis_maxy) + 1;
-
-    m_screen->set_visible_area(0, vis_maxx, 0, vis_maxy);
+	if (offset < VRAM_WINDOW_SIZE)
+		return m_vram[offset];
+	return 0xff;
 }
 
-// Read 8D068 ("machine profile") from VRAM mirror and decide mono vs color.
-void epson_gavdp_device::update_color_profile_from_ga()
-{
-    const u32 idx_prof = linear_index_from_rel(0x0D068);
-    if (idx_prof != ~0u)
-        m_machine_profile = m_cols[idx_prof];
+// ============================================================================
+//  Core VRAM write handler with CLS/scroll detection + scroll fix
+// ============================================================================
 
-    // Empirically: 02 in HR mono, 07 in RGB color (ignore high bit).
-    const u8 prof = m_machine_profile & 0x7F;
-    m_color_mode = (prof == 0x07);   // true only for RGB color profiles
+void gavdp_device::vram_w(offs_t offset, u8 data)
+{
+	// ---------------- D068: profile + bit7 = clear/scroll engine ----------
+	if (offset == REG_D068_OFFSET)
+	{
+		u8 old = m_d068_last;
+		m_d068_last = data;
+
+		bool old_clear = (old & 0x80) != 0;
+		bool new_clear = (data & 0x80) != 0;
+
+		// Rising edge: enter clear/scroll phase
+		if (!old_clear && new_clear)
+		{
+			m_clear_scroll_mode = true;
+			m_scroll_mode       = false;   // assume CLS until we see C663
+
+			// start counting zeros for this pass
+			m_erase_tracking = true;
+			m_erase_count    = 0;
+			m_erase_min      = 0;
+			m_erase_max      = 0;
+			m_erase_min_low  = 0xff;
+			m_erase_max_low  = 0x00;
+
+			// reset per-column tracking
+			for (int col = 0; col < VRAM_COLS; ++col)
+			{
+				m_col_used[col]    = 0;
+				m_col_min_idx[col] = 0xffff;
+				m_col_max_idx[col] = 0x0000;
+			}
+		}
+
+	if (old_clear && !new_clear)
+{
+	if (m_erase_tracking)
+	{
+		logerror("GAVDP: CLEAR pass end (scroll=%d) zeros=%u\n",
+		         (int)m_scroll_mode, m_erase_count);
+
+		if (m_scroll_mode)
+		{
+			// SCROLL CASE
+			logerror("GAVDP: SCROLL C663=%02X C462=%02X zeros=%u\n",
+			         m_reg_c663, m_reg_c462, m_erase_count);
+
+			if (m_erase_count >= 1200 && m_erase_count <= 1600)
+				clear_scroll_bottom_band_for_columns();
+
+			for (int col = 0; col < VRAM_COLS; ++col)
+			{
+				if (!m_col_used[col])
+					continue;
+
+				logerror("GAVDP: SCROLL col=%02d idx=%03X..%03X\n",
+				         col,
+				         (unsigned)m_col_min_idx[col],
+				         (unsigned)m_col_max_idx[col]);
+			}
+		}
+		else
+		{
+			// NON-SCROLL: either full CLS or smaller window
+			if (m_erase_count >= 31840)
+			{
+				// Full-screen CLS
+				logerror("GAVDP: CLS heuristic (zeros=%u) → clear_text_vram()\n",
+				         m_erase_count);
+				clear_text_vram();
+			}
+			else
+			{
+				// *** WINDOW CLEAR ***
+				logerror("GAVDP: WINDOW CLEAR zeros=%u (no CLS)\n",
+				         m_erase_count);
+
+				// For debugging: geometry summary
+				int used_cols = 0;
+				int first_col = -1;
+				int last_col  = -1;
+				for (int col = 0; col < VRAM_COLS; ++col)
+				{
+					if (!m_col_used[col])
+						continue;
+
+					if (first_col < 0)
+						first_col = col;
+					last_col = col;
+					used_cols++;
+
+					logerror("GAVDP: WINDOW col=%02d idx=%03X..%03X\n",
+					         col,
+					         (unsigned)m_col_min_idx[col],
+					         (unsigned)m_col_max_idx[col]);
+				}
+
+				logerror("GAVDP: WINDOW summary cols=%d range=%02d..%02d zeros=%u\n",
+				         used_cols, first_col, last_col, m_erase_count);
+
+				// Perform a logical rectangular clear based on the GA's band info.
+				clear_window_from_ga();
+			}
+		}
+	}
+
+	// reset flags for next pass
+	m_clear_scroll_mode = false;
+	m_scroll_mode       = false;
+	m_erase_tracking    = false;
+	m_erase_count       = 0;
 }
 
-void epson_gavdp_device::install_vram_window(address_space &space, offs_t base)
+
+
+		// store D068 itself
+		if (offset < VRAM_WINDOW_SIZE)
+			m_vram[offset] = data;
+
+		logerror("GAVDP: D068 write @%05X = %02X (clear_scroll=%d, scroll=%d)\n",
+		         (unsigned)offset, data,
+		         (int)m_clear_scroll_mode, (int)m_scroll_mode);
+		return;
+	}
+
+	// ---------------- C663: scroll index ------------------------------------
+	if (offset == REG_C663_OFFSET)
+	{
+		m_reg_c663 = data; // track latest scroll index
+
+		// Any C663 write during clear/scroll marks this pass as scroll
+		if (m_clear_scroll_mode)
+			m_scroll_mode = true;
+
+		if (offset < VRAM_WINDOW_SIZE)
+			m_vram[offset] = data;
+
+		logerror("GAVDP: C663 write @%05X = %02X (clear_scroll=%d, scroll=%d)\n",
+		         (unsigned)offset, data,
+		         (int)m_clear_scroll_mode, (int)m_scroll_mode);
+		return;
+	}
+
+	// ---------------- C462: scroll phase helper -----------------------------
+	if (offset == REG_C462_OFFSET)
+	{
+		m_reg_c462 = data; // track latest phase/flag
+
+		if (offset < VRAM_WINDOW_SIZE)
+			m_vram[offset] = data;
+
+		logerror("GAVDP: C462 write @%05X = %02X (clear_scroll=%d, scroll=%d)\n",
+		         (unsigned)offset, data,
+		         (int)m_clear_scroll_mode, (int)m_scroll_mode);
+		return;
+	}
+
+	// ---------------- D269: attribute register ------------------------------
+	if (offset == REG_D269_OFFSET)
+	{
+		if (offset < VRAM_WINDOW_SIZE)
+			m_vram[offset] = data;
+
+		logerror("GAVDP: D269 write @%05X = %02X\n", (unsigned)offset, data);
+		return;
+	}
+
+	// ---------------- Other GAVDP regs: log + store -------------------------
+	if (offset == REG_C060_OFFSET ||
+	    offset == REG_C261_OFFSET ||
+	    offset == REG_D46A_OFFSET ||
+	    offset == REG_C864_OFFSET ||
+	    offset == REG_CA65_OFFSET ||
+	    offset == REG_CC66_OFFSET ||
+	    offset == REG_CE67_OFFSET)
+	{
+		if (offset < VRAM_WINDOW_SIZE)
+			m_vram[offset] = data;
+
+		logerror("GAVDP: REG write @%05X = %02X\n", (unsigned)offset, data);
+		return;
+	}
+
+	// ---------------- Default: normal VRAM write ----------------------------
+if (offset < VRAM_WINDOW_SIZE)
 {
-    m_window_base = base;
+	// Count and track zero writes only while clear/scroll is active
+	if (m_clear_scroll_mode && m_erase_tracking && data == 0x00)
+	{
+		m_erase_count++;
 
-    const offs_t start = base;
-    const offs_t end   = base + VRAM_BYTES - 1;
+		// Column and index within column (0..79, 0..0x1FF)
+		u32 col = offset / VRAM_BYTES_PER_COL;
+		u16 idx = offset % VRAM_BYTES_PER_COL;
 
-    space.unmap_readwrite(start, end);
+		if (col < VRAM_COLS)
+		{
+			m_col_used[col] = 1;
+			if (idx < m_col_min_idx[col])
+				m_col_min_idx[col] = idx;
+			if (idx > m_col_max_idx[col])
+				m_col_max_idx[col] = idx;
+		}
 
-    space.install_readwrite_handler(
-        start, end,
-        read8sm_delegate(*this, FUNC(epson_gavdp_device::vram_r)),
-        write8sm_delegate(*this, FUNC(epson_gavdp_device::vram_w)));
+		u8 low = (u8)(offset & 0xff);
+		if (m_erase_min == 0 && m_erase_count == 1)
+			m_erase_min = offset;
+		if (offset > m_erase_max)
+			m_erase_max = offset;
+		if (low < m_erase_min_low)
+			m_erase_min_low = low;
+		if (low > m_erase_max_low)
+			m_erase_max_low = low;
+
+		// IMPORTANT:
+		// During any GA clear pass (scroll / window / CLS),
+		// we DO NOT apply the zero writes directly.
+		// We emulate the clear logically at the end of the pass.
+		return;
+	}
+
+	// Normal write (non-zero or not in clear pass)
+	m_vram[offset] = data;
+}
 }
 
-u32 epson_gavdp_device::linear_index_from_rel(u32 rel) const
-{
-    const u32 col = rel / m_col_stride;
-    if (col >= u32(m_char_cols))
-        return ~0u;
+// ============================================================================
+//  Window helper: clear GA-defined rectangle (small menu/window erases)
+// ============================================================================
+//
+// We use the GA's band info (m_col_used[], m_col_min_idx[], m_col_max_idx[])
+// accumulated during a WINDOW CLEAR pass, but instead of just taking the
+// outermost min/max (which pulls in noise), we:
+//
+//  1) Find the *longest contiguous run* of columns where m_col_used[col] == 1.
+//  2) Compute vmin/vmax only over that run.
+//  3) Clear a solid band for that run.
+//
+// This usually matches the actual menu window and avoids stray columns/rows
+// that make the rectangle too big or slightly shifted.
+//
 
-    const u32 off = rel % m_col_stride;
-    return col * m_col_stride + off;
+void gavdp_device::clear_window_from_ga()
+{
+	if (m_vram.empty())
+		return;
+
+	// --- 1) Find the longest run of used columns ---
+	int best_start = -1;
+	int best_len   = 0;
+
+	int col = 0;
+	while (col < VRAM_COLS)
+	{
+		// skip unused columns
+		while (col < VRAM_COLS && !m_col_used[col])
+			col++;
+
+		if (col >= VRAM_COLS)
+			break;
+
+		int run_start = col;
+		int run_len   = 0;
+
+		// count contiguous used columns
+		while (col < VRAM_COLS && m_col_used[col])
+		{
+			run_len++;
+			col++;
+		}
+
+		if (run_len > best_len)
+		{
+			best_len   = run_len;
+			best_start = run_start;
+		}
+	}
+
+	if (best_start < 0 || best_len <= 0)
+	{
+		logerror("GAVDP: clear_window_from_ga: no contiguous used columns, nothing to do\n");
+		return;
+	}
+
+	int first_col = best_start;
+	int last_col  = best_start + best_len - 1;
+
+	// --- 2) Compute vertical band only over that run ---
+	u16 vmin = 0x1FF;
+	u16 vmax = 0x000;
+
+	for (int c = first_col; c <= last_col; ++c)
+	{
+		if (!m_col_used[c])
+			continue;
+
+		if (m_col_min_idx[c] < vmin)
+			vmin = m_col_min_idx[c];
+		if (m_col_max_idx[c] > vmax)
+			vmax = m_col_max_idx[c];
+	}
+
+	if (vmin > vmax)
+	{
+		logerror("GAVDP: clear_window_from_ga: invalid vmin/vmax (%03X..%03X)\n",
+		         (unsigned)vmin, (unsigned)vmax);
+		return;
+	}
+
+	// Clamp to our per-column VRAM range.
+	if (vmax >= VRAM_BYTES_PER_COL)
+		vmax = VRAM_BYTES_PER_COL - 1;
+
+	int cleared_cols  = 0;
+	int cleared_lines = vmax - vmin + 1;
+
+	// --- 3) Clear the solid band within that run ---
+	for (int c = first_col; c <= last_col; ++c)
+	{
+		if (!m_col_used[c])
+			continue;
+
+		++cleared_cols;
+		u32 col_base = c * VRAM_BYTES_PER_COL;
+
+		for (u16 idx = vmin; idx <= vmax; ++idx)
+		{
+			u32 offset = col_base + idx;
+			if (offset < m_vram.size())
+				m_vram[offset] = 0x00;
+		}
+	}
+
+	logerror("GAVDP: Window band cleared cols=%d (%d..%d) idx=%03X..%03X (lines≈%d)\n",
+	         cleared_cols, first_col, last_col,
+	         (unsigned)vmin, (unsigned)vmax, cleared_lines);
 }
 
-// Map VRAM-relative offset to approximate screen Y (0..399).
-bool epson_gavdp_device::rel_to_screen_y(u32 rel, int &y) const
+// ============================================================================
+//  CLS helper: clear text VRAM region for this mode
+// ============================================================================
+
+void gavdp_device::clear_text_vram()
 {
-    const u32 column = rel / m_col_stride;
-    if (column >= u32(m_char_cols))
-        return false;
+	if (m_vram.empty())
+		return;
 
-    const u32 offs   = rel % m_col_stride;
-    const bool bottom = offs >= m_bottom_off;
-    const u32 within_half = bottom ? (offs - m_bottom_off) : offs;
+	// This is your "full erase" pattern for mono text:
+	// clear 0x80–0xCF in each 0x100-byte band, up to 0x8E80.
+	for (u32 base = 0x0000; base <= 0xCBFF; base += 0x0100)
+	{
+		u32 start = base;
+		u32 end   = base + 0x00FF; // 0x80..0xCF → 80 bytes
 
-    const u32 crow  = within_half / 0x10;     // 16 bytes per text row per column
-    const u32 scan  = within_half & 0x0F;     // 0..15 within that row
+		if (start >= m_vram.size())
+			break;
 
-    int base_y = bottom ? m_split : 0;
-    int yy     = int(crow * 16 + scan);
+		if (end >= m_vram.size())
+			end = m_vram.size() - 1;
 
-    y = base_y + yy;
-    if (y < 0 || y >= DEF_HEIGHT)
-        return false;
+		for (u32 off = start; off <= end; ++off)
+			m_vram[off] = 0x00;
+	}
 
-    return true;
+	logerror("GAVDP: CLS emulated (cleared bands 0x0080–0x8ECF, step 0x100)\n");
 }
 
-u8 epson_gavdp_device::get_scroll_scanlines() const
-{
-    // GA scroll mirror at C663 in VRAM
-    const u32 idx = linear_index_from_rel(0x0C663);
-    if (idx == ~0u)
-        return 0;
+// ============================================================================
+//  Scroll helper: clear logical bottom row (16-pixel band) for touched columns
+// ============================================================================
 
-    return m_cols[idx];
+void gavdp_device::clear_scroll_bottom_band_for_columns()
+{
+	if (m_vram.empty())
+		return;
+
+	const int height       = m_visible_height;         // 400 (mono) or 200 (color)
+	const int total_lines  = height;
+	const int band_height  = 16;                       // one text row
+	const int bottom_start = height - band_height;     // e.g. 384 for 400-line
+
+	u8 scroll_px = vram_byte(REG_C663_OFFSET);
+
+	int cleared_cols = 0;
+
+	for (int col = 0; col < m_visible_cols && col < VRAM_COLS; ++col)
+	{
+		if (!m_col_used[col])
+			continue;
+
+		++cleared_cols;
+
+		u32 col_base = col * VRAM_BYTES_PER_COL;
+
+		for (int y = bottom_start; y < height; ++y)
+		{
+			int scrolled_y = y + scroll_px;
+			while (scrolled_y >= total_lines)
+				scrolled_y -= total_lines;
+
+			int scan_index;
+			if (!m_color_mode)
+			{
+				// mono 640x400: split 0..199 / 200..399 across 0x000/0x100 bands
+				if (scrolled_y < 200)
+					scan_index = scrolled_y;                 // 0x000..0x00C7
+				else
+					scan_index = 0x100 + (scrolled_y - 200); // 0x0100..0x01C7
+			}
+			else
+			{
+				// color 640x200: single 0x000..0x00C7 band
+				scan_index = scrolled_y;
+			}
+
+			u32 offset = col_base + scan_index;
+			if (offset < m_vram.size())
+				m_vram[offset] = 0x00;
+		}
+	}
+
+	logerror("GAVDP: Scroll bottom band cleared for %d columns (height=%d, scroll=%02X)\n",
+	         cleared_cols, height, scroll_px);
 }
 
-u8 epson_gavdp_device::vram_r(offs_t offset)
-{
-    const u32 rel = u32(offset);
-    const u32 idx = linear_index_from_rel(rel);
-    if (idx == ~0u)
-        return 0xFF;
+// ============================================================================
+//  Screen update
+// ============================================================================
 
-    return m_cols[idx];
+u32 gavdp_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	update_geometry_from_profile();
+	render_framebuffer(bitmap, cliprect);
+	return 0;
 }
 
-void epson_gavdp_device::vram_w(offs_t offset, u8 data)
+// ============================================================================
+//  Helpers
+// ============================================================================
+
+void gavdp_device::init_palette()
 {
-    const u32 rel = u32(offset);
-
-    // GA control register mirror at 8D269 — treat as attribute latch
-    if (rel == 0x0D269)
-    {
-        m_latched_attr = data;
-
-        const u32 idx_attr = linear_index_from_rel(rel);
-        if (idx_attr != ~0u)
-            m_cols[idx_attr] = data;
-
-        return;
-    }
-
-    // Machine profile mirror at 8D068 — update mono vs color state.
-    if (rel == 0x0D068)
-    {
-        const u32 idx_prof = linear_index_from_rel(rel);
-        if (idx_prof != ~0u)
-            m_cols[idx_prof] = data;
-
-        m_machine_profile = data;
-        update_color_profile_from_ga();
-        return;
-    }
-
-    // GA scroll mirror at C663
-    if (rel == 0x0C663)
-    {
-        const u32 idx_scroll = linear_index_from_rel(rel);
-        if (idx_scroll != ~0u)
-            m_cols[idx_scroll] = data;
-
-        m_c663_scroll = data;
-        return;
-    }
-
-    const u32 idx = linear_index_from_rel(rel);
-    if (idx == ~0u)
-        return;
-
-    // Write to VRAM
-    m_cols[idx] = data;
-
-    // // --------------------------------------------------------------------
-    // // PROOF OF CONCEPT:
-    // // If BIOS writes to the *first column* of a text row (col 0, scan 0),
-    // // immediately clear that entire text row in VRAM (all columns, 16 scans).
-    // // --------------------------------------------------------------------
-    // {
-    //     const u32 col      = rel / m_col_stride;            // 0..m_char_cols-1
-    //     const u32 col_off  = rel % m_col_stride;            // 0..(m_col_stride-1)
-
-    //     const bool bottom      = (col_off >= m_bottom_off); // top/bottom half
-    //     const u32 within_half  = bottom ? (col_off - m_bottom_off) : col_off;
-
-    //     const int crow = int(within_half >> 4);             // 16 bytes per text row
-    //     const int scan = int(within_half & 0x0F);           // 0..15
-
-    //     // Split 25 rows as 12 top + 13 bottom in mode 7 text
-    //     constexpr int TOP_ROWS = 12;
-    //     int logical_row = 0;
-    //     if (!bottom)
-    //         logical_row = crow;              // 0..11
-    //     else
-    //         logical_row = TOP_ROWS + crow;   // 12..24
-
-    //     if (logical_row >= 0 && logical_row < TEXT_ROWS)
-    //     {
-    //         // "Column 1 in that row" → col 0, scan 0
-    //         if (col == 0 && scan == 0)
-    //         {
-    //             const u32 tracked = u32(m_char_cols) * m_col_stride;
-    //             const u32 half_base = bottom ? m_bottom_off : 0x000;
-    //             const u32 row_base  = half_base + u32(crow) * 0x10u;
-
-    //             // Zero this row across all columns and all 16 scanlines
-    //             for (int c = 0; c < m_char_cols; ++c)
-    //             {
-    //                 const u32 col_base = u32(c) * m_col_stride;
-    //                 for (int s = 0; s < 16; ++s)
-    //                 {
-    //                     const u32 a_off = row_base + u32(s);
-    //                     const u32 li    = col_base + a_off;
-    //                     if (li < tracked)
-    //                         m_cols[li] = 0x00;
-    //                 }
-    //             }
-    //         }
-    //     }
-    // }
-
-    // In HR mono mode we do NOT maintain a per-cell attribute plane;
-    // BIOS performs highlight by manipulating glyph bits directly.
-    if (!m_color_mode)
-        return;
-
-    // In color mode, treat attributes as 8-scanline cells.
-    int y;
-    if (!rel_to_screen_y(rel, y))
-        return;
-
-    const int attr_row = y / 8;   // 8-scanline tall attribute cells
-    if (attr_row < 0 || attr_row >= ATTR_ROWS)
-        return;
-
-    // Column (x/8) is simply the VRAM column index.
-    const int attr_col = int(rel / m_col_stride);
-    if (attr_col < 0 || attr_col >= ATTR_COLS)
-        return;
-
-    const int i = attr_row * ATTR_COLS + attr_col;
-    m_attr[i] = m_latched_attr;
+	// Very simple 8-color RGB palette for now.
+	m_palette[0] = rgb_t(0x00, 0x00, 0x00); // black
+	m_palette[1] = rgb_t(0x00, 0x00, 0xff); // blue
+	m_palette[2] = rgb_t(0x00, 0xff, 0x00); // green
+	m_palette[3] = rgb_t(0x00, 0xff, 0xff); // cyan
+	m_palette[4] = rgb_t(0xff, 0x00, 0x00); // red
+	m_palette[5] = rgb_t(0xff, 0x00, 0xff); // magenta
+	m_palette[6] = rgb_t(0xff, 0xff, 0x00); // yellow
+	m_palette[7] = rgb_t(0xff, 0xff, 0xff); // white
 }
 
-u32 epson_gavdp_device::screen_update(screen_device& screen, bitmap_rgb32& bitmap, const rectangle& cliprect)
+inline u8 gavdp_device::vram_byte(u32 offset) const
 {
-    update_geometry_from_bios();
-    update_color_profile_from_ga();
-    render_mode7(bitmap);
-    return 0;
+	if (offset < m_vram.size())
+		return m_vram[offset];
+	return 0xff;
 }
 
-void epson_gavdp_device::render_mode7(bitmap_rgb32 &bmp)
+inline u8 &gavdp_device::vram_byte_ref(u32 offset)
 {
-    const int W = std::min(m_logical_w, bmp.width());
-    const int H = std::min(m_logical_h, bmp.height());
+	static u8 dummy = 0xff;
+	if (offset < m_vram.size())
+		return m_vram[offset];
+	return dummy;
+}
 
-    const int cols    = std::min(m_char_cols, W / 8);
-    const u32 tracked = u32(m_char_cols) * m_col_stride;
+void gavdp_device::update_geometry_from_profile()
+{
+	u8 prof_raw = vram_byte(REG_D068_OFFSET);
+	u8 prof     = prof_raw & 0x7f; // ignore bit7 (CLS/scroll) for geometry
 
-    // Use C663 as a *raw scanline offset* (no mod 25, no fancy math).
-    const u8 scroll = get_scroll_scanlines();
+	bool new_color  = m_color_mode;
+	int  new_height = m_visible_height;
 
-    // We only ever show 25 text rows (25 * 16 = 400 scanlines).
-    constexpr int SCANLINES_PERROW = 16;
-    constexpr int TEXT_SCANLINES   = TEXT_ROWS * SCANLINES_PERROW; // 400
+	if (prof == 2)      // hi-res mono 640x400
+	{
+		new_color  = false;
+		new_height = 400;
+	}
+	else if (prof == 7) // color 640x200
+	{
+		new_color  = true;
+		new_height = 200;
+	}
 
-    // Clear output bitmap (background = black)
-    bmp.fill(m_palette->pen(0));
+	int new_cols  = 80;
+	int new_width = new_cols * 8;
 
-    for (int y = 0; y < H; ++y)
-    {
-        u32 *dst = &bmp.pix(y);
+	if (new_color != m_color_mode ||
+	    new_height != m_visible_height ||
+	    new_cols != m_visible_cols)
+	{
+		m_color_mode     = new_color;
+		m_visible_height = new_height;
+		m_visible_cols   = new_cols;
+		m_visible_width  = new_width;
 
-        // Effective scanline from top of the text area:
-        // C663 is the starting scanline, y is the on-screen line.
-        int eff_y = int(scroll) + y;
+		if (m_screen)
+			m_screen->set_visible_area(0, m_visible_width - 1, 0, m_visible_height - 1);
+	}
+}
 
-        if (eff_y < 0 || eff_y >= TEXT_SCANLINES)
-        {
-            // Outside 25-row text window, just background
-            u8 bg = 0;
-            if (m_color_mode)
-            {
-                int attr_row = y / 8;
-                if (attr_row < 0)          attr_row = 0;
-                if (attr_row >= ATTR_ROWS) attr_row = ATTR_ROWS - 1;
-                u8 attr0 = m_attr[attr_row * ATTR_COLS + 0];
-                bg = (attr0 >> 4) & 0x07;
-            }
+// ============================================================================
+//  Rendering – common
+// ============================================================================
 
-            for (int x = 0; x < W; ++x)
-                dst[x] = m_palette->pen(bg);
+void gavdp_device::render_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	bitmap.fill(rgb_t::black(), cliprect);
 
-            continue;
-        }
+	if (m_color_mode)
+		render_mode_color(bitmap, cliprect);
+	else
+		render_mode_mono(bitmap, cliprect);
+}
 
-        // Decide if this effective scanline is in the top or bottom half
-        const bool bottom = (eff_y >= m_split);
-        const int  yy     = bottom ? (eff_y - m_split) : eff_y;
+// ============================================================================
+//  Rendering – mono (640x400, simple pixel scroll with C663)
+// ============================================================================
 
-        // Text row index and scanline within that row in VRAM layout
-        const int crow    = yy >> 4;        // 16 scanlines per text row
-        const int scan    = yy & 0x0F;      // 0..15
-        const u32 half    = bottom ? m_bottom_off : 0x000;
+void gavdp_device::render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	const int width  = m_visible_width;   // 640
+	const int height = m_visible_height;  // 400
 
-        // Map crow/half to logical 0..24 text row (for attribute lookup)
-        constexpr int TOP_ROWS = 12;
-        int logical_row = 0;
-        if (!bottom)
-            logical_row = crow;
-        else
-            logical_row = TOP_ROWS + crow;
+	if (m_visible_cols <= 0)
+		return;
 
-        for (int c = 0; c < cols; ++c)
-        {
-            // Column-centric VRAM layout:
-            //   - each text row uses 0x10 bytes per column,
-            //   - 'scan' selects which byte inside the 16-byte row slot.
-            const u32 addr_off = half + u32(crow) * 0x10u + u32(scan);
-            const u32 lin      = u32(c) * m_col_stride + addr_off;
+	u8  c663         = vram_byte(REG_C663_OFFSET);
+	int scroll_px    = int(c663);
+	const int total_lines = 400;
 
-            u8 b = 0;
-            if (lin < tracked)
-                b = m_cols[lin];
+	for (int y = cliprect.min_y; y <= cliprect.max_y && y < height; ++y)
+	{
+		int scrolled_y = y + scroll_px;
+		while (scrolled_y >= total_lines)
+			scrolled_y -= total_lines;
 
-            // Defaults for mono (HR)
-            u8 fg = 7;
-            u8 bg = 0;
+		int scan_index;
+		if (scrolled_y < 200)
+			scan_index = scrolled_y;                 // 0x000..0x00C7
+		else
+			scan_index = 0x100 + (scrolled_y - 200); // 0x0100..0x01C7
 
-            if (m_color_mode)
-            {
-                // In color text mode, attributes are per character-row,
-                // using 8-scanline “cells”.
-                int attr_row = y / 8;
-                if (attr_row < 0)          attr_row = 0;
-                if (attr_row >= ATTR_ROWS) attr_row = ATTR_ROWS - 1;
+		for (int x = cliprect.min_x; x <= cliprect.max_x && x < width; ++x)
+		{
+			int col = x >> 3; // 0..79
+			if (col < 0 || col >= m_visible_cols)
+			{
+				bitmap.pix(y, x) = rgb_t::black();
+				continue;
+			}
 
-                const int attr_col = c;
-                u8 attr = 0x07;
-                if (attr_col >= 0 && attr_col < ATTR_COLS)
-                    attr = m_attr[attr_row * ATTR_COLS + attr_col];
+			int bit = 7 - (x & 7);
 
-                fg =  attr       & 0x07;
-                bg = (attr >> 4) & 0x07;
-            }
-            else
-            {
-                // HR mono: BIOS encodes highlight via glyph bits.
-                fg = 7;
-                bg = 0;
-            }
+			u32 col_base = col * VRAM_BYTES_PER_COL; // 0x200 per column
+			u32 offset   = col_base + scan_index;
 
-            const int x0 = c * 8;
-            const int x1 = std::min(x0 + 8, W);
-            for (int x = x0; x < x1; ++x)
-            {
-                const int bit       = 7 - (x & 7);
-                const u8  glyph_bit = (b >> bit) & 1;
-                const u8  pen_index = glyph_bit ? fg : bg;
-                dst[x] = m_palette->pen(pen_index);
-            }
-        }
+			bool on = false;
+			if (offset < VRAM_PLANE_SIZE)
+			{
+				u8 b = vram_byte(offset);
+				on   = (b >> bit) & 0x01;
+			}
 
-        // Fill remainder of the line with background (take attr from column 0)
-        u8 bg = 0;
-        if (m_color_mode)
-        {
-            int attr_row = y / 8;
-            if (attr_row < 0)          attr_row = 0;
-            if (attr_row >= ATTR_ROWS) attr_row = ATTR_ROWS - 1;
+			rgb_t color = on ? rgb_t(0xff, 0xff, 0xff) : rgb_t(0x00, 0x00, 0x00);
+			bitmap.pix(y, x) = color;
+		}
+	}
+}
 
-            u8 attr0 = m_attr[attr_row * ATTR_COLS + 0];
-            bg = (attr0 >> 4) & 0x07;
-        }
+// ============================================================================
+//  Rendering – color (unchanged 640x200)
+// ============================================================================
 
-        for (int x = cols * 8; x < W; ++x)
-            dst[x] = m_palette->pen(bg);
-    }
+void gavdp_device::render_mode_color(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	const int width  = m_visible_width;   // 640
+	const int height = m_visible_height;  // 200
+
+	if (m_visible_cols <= 0)
+		return;
+
+	u8 attr = vram_byte(REG_D269_OFFSET) & 0x77;
+	u8 fg   = attr & 0x07;
+	u8 bg   = (attr >> 4) & 0x07;
+
+	u8  c663      = vram_byte(REG_C663_OFFSET);
+	int scroll_px = int(c663);
+	const int total_lines = 200;
+
+	for (int y = cliprect.min_y; y <= cliprect.max_y && y < height; ++y)
+	{
+		int scrolled_y = y + scroll_px;
+		while (scrolled_y >= total_lines)
+			scrolled_y -= total_lines;
+
+		int scan_index = scrolled_y; // 0x000..0x00C7
+
+		for (int x = cliprect.min_x; x <= cliprect.max_x && x < width; ++x)
+		{
+			int col = x >> 3;
+			if (col < 0 || col >= m_visible_cols)
+			{
+				bitmap.pix(y, x) = m_palette[bg];
+				continue;
+			}
+
+			int bit = 7 - (x & 7);
+
+			u32 col_base = col * VRAM_BYTES_PER_COL;
+			u32 offset   = col_base + scan_index;
+
+			bool on = false;
+			if (offset < VRAM_PLANE_SIZE)
+			{
+				u8 b = vram_byte(offset);
+				on   = (b >> bit) & 0x01;
+			}
+
+			rgb_t color = on ? m_palette[fg] : m_palette[bg];
+			bitmap.pix(y, x) = color;
+		}
+	}
 }
