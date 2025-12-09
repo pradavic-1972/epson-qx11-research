@@ -43,12 +43,12 @@ commands rather than pixel data.
 ## 1.2 Architectural Diagram
 
             ┌───────────────────────────────┐
-            │            CPU 8088            │
+            │            CPU 8088           │
             └───────┬───────────────────────┘
                     │ Memory-mapped access
                     ▼
     ┌────────────────────────────────────────────────┐
-    │                  GAVDP Gate-Array               │
+    │                  GAVDP Gate-Array              │
     │                                                │
     │   • Column-oriented VRAM                       │
     │   • Hardware scroll/erase                      │
@@ -318,26 +318,25 @@ This section documents everything known so far.
 
 ## 3.1 Summary table of the 11 registers
 
-| Reg # | Physical Address | Name / Purpose        | Status                     |
+| Reg # | Physical Address | Name / Purpose         | Status                     |
 |-------|------------------|------------------------|----------------------------|
-| R0    | 0x8C663          | SCROLL_IDX             | Fully decoded             |
+| R0    | 0x8C663          | SCROLL_IDX             | Fully decoded              |
 | R1    | 0x8D068          | MODE_FLAGS             | Fully decoded (bit 8 critical) |
 | R2    | 0x8D269          | ATTR_LATCH             | Fully decoded / used       |
-| R3    | TBD (in VRAM)    | Internal GAVDP ctrl    | Known written, unknown use |
-| R4    | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
-| R5    | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
-| R6    | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
-| R7    | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
-| R8    | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
-| R9    | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
-| R10   | TBD              | Internal GAVDP ctrl    | Known written, unknown use |
+| R3    | 0x8C060    | Internal GAVDP ctrl    | Known written, unknown use |
+| R4    | 0x8C261              | Internal GAVDP ctrl    | Known written, unknown use |
+| R5    | 0x8C462             | Internal GAVDP ctrl   | bit 8 switches when accessing lower portion of the screen |
+| R6    | 0x8D46A          | Internal GAVDP ctrl    | Known written, unknown use |
+| R7    | 0x8C864              | Internal GAVDP ctrl    | Known written, unknown use |
+| R8    | 0x8CA65            | Internal GAVDP ctrl    | Known written, unknown use |
+| R9    | 0x8CC66            | Internal GAVDP ctrl    | Known written, unknown use |
+| R10   | 0x8CE67              | Internal GAVDP ctrl    | Known written, unknown use |
 
 Notes:
 
 - All 11 registers reside in the VRAM mapping, but outside the visible
   80-column region used for text and graphics.
-- The exact addresses for R3–R10 are still being mapped; the BIOS touches
-  them during POST and during mode transitions.
+
 - The emulator should treat writes to unknown registers as **non-pixel events**
   (log them, but do not modify the bitmap).
 
@@ -426,7 +425,7 @@ Every time the BIOS draws a character through its OEM INT 10h routines:
 
 ### Observed behavior
 
-- When the BIOS sets attribute 0x70 (white on black), characters render normally.
+- When the BIOS sets attribute 0x97 (white on black), characters render normally.
 - Inverse video regions appear when bits in this register switch foreground/background.
 - Highlighted menu bars in SETUP rely on value changes in this register.
 
@@ -498,6 +497,102 @@ scroll/erase mode disabled.
 
 The next section focuses on **scroll/erase behavior**, which is central to the
 QX-11 display system.
+## 4. Scroll/Erase Engine — SCROLL_IDX, MODE_FLAGS.bit8, and D462
+
+The QX-11 does **not** scroll screen contents by copying VRAM.  
+Instead, GAVDP implements a **hardware scroll/erase engine** that operates through:
+
+- The ring-buffer row index (`SCROLL_IDX`)
+- The scroll/erase mode bit (`MODE_FLAGS.bit8`)
+- An additional VRAM location (`D462`) used as a scroll reference or boundary
+
+This mechanism is essential for reproducing correct QX-11 behavior.
+
+
+---
+
+## 4.1 SCROLL_IDX — the ring buffer origin
+
+From Section 3, `SCROLL_IDX` defines the logical top row of the screen:
+
+- Logical row 0 → points to physical row `SCROLL_IDX`
+- Logical row 1 → points to `(SCROLL_IDX + 1) mod 25`
+- …
+- Logical row 24 → points to `(SCROLL_IDX + 24) mod 25`
+
+This is why scrolling upward by one line does **not** require rewriting the
+entire text area.
+
+The emulator must treat this register as an immediate state-change, not a bitmap
+operation.
+
+
+---
+
+## 4.2 D462 — scroll reference / clear boundary
+
+At VRAM physical address **0x8D462**, the BIOS writes a value during every scroll
+operation.
+
+Based on logs and behavior:
+
+- D462 appears to encode the **target row** or **reset row** used when clearing
+  the line newly entering the window after a scroll.
+- It is always written *while scroll/erase mode is active*.
+- The exact details remain partially undocumented, but the pattern is:
+
+  1. BIOS enters scroll/erase mode (MODE_FLAGS.bit8 = 1)  
+  2. BIOS updates SCROLL_IDX  
+  3. BIOS writes to D462  
+  4. BIOS performs a sequence of VRAM writes that trigger erase/clear behavior  
+  5. BIOS exits scroll/erase mode (MODE_FLAGS.bit8 = 0)
+
+The emulator should **capture** the value written to D462 and make it available
+to the scroll engine, even if full semantics are not yet decoded.
+
+
+---
+
+## 4.3 MODE_FLAGS.bit8 — enabling the scroll/erase engine
+
+`MODE_FLAGS` contains a critical bit:
+
+- **Bit 8 = Scroll/Erase Mode Enable**
+
+When **bit 8 = 1**, VRAM writes are **not pixel writes**.  
+Instead, they are interpreted as **commands** to the GAVDP scroll engine.
+
+### Effects in scroll/erase mode:
+
+- Writes in the text area clear rows rather than store bitmap data.
+- Writes to D462 and adjacent fields cause region-specific blanking.
+- Writes may increment or synchronize internal pointers.
+
+### Effects when bit 8 goes back to 0:
+
+- VRAM writes resume normal 1-bpp behavior.
+- The newly exposed line is now clean and ready for rendering characters.
+- SCROLL_IDX now points to the correct new origin row.
+
+
+---
+
+## 4.4 The scroll sequence (as observed from BIOS logs)
+
+A typical upward scroll initiated by the BIOS follows this pattern:
+
+1. **Enable scroll mode**  
+   MODE_FLAGS |= 0x0100
+
+2. **Update ring buffer index**  
+
+3. **Store reference value in D462**  
+(Exact meaning still under study)
+
+4. **Perform a series of VRAM writes**  
+These writes do *not* store pixels — they clear or reset the relevant rows.
+
+5. **Disable scroll mode**  
 
 
 6. **BIOS draws characters into the newly exposed bottom line**  
