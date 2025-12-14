@@ -60,9 +60,8 @@ Execution occurs **after the IVT, INT 10h, INT 13h, and DOS infrastructure are a
   - `0xC0000` → `0x0B = C0`
   - `0xA0000` → `0x0B = A0`
 - If the value does not match:
-  - the cartridge is **not executed**
-  - but may still be mounted as a filesystem
-
+  - the cartridge is recognized 
+  
 ---
 
 ## 5. Filesystem Enable (offset 0x0C)
