@@ -45,6 +45,7 @@ epson-qx11-research/
 - DRAM bank emulation and memory upgrades
 
 ### ✅ Experiments
+- **Boot another OS (ELKS, FreeDOS)** Use the cartridge interface to boot another O.S.
 - **RAM Expansion** up to 1MB using Raspberry Pi Pico
 - **PSU Replacement** using modern switching supplies
 - **Custom VGA Output** interfaced via GPIO (Pico-based)
