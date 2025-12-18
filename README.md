@@ -41,7 +41,7 @@ epson-qx11-research/
 
 ### ✅ Reverse Engineering
 - GAFDDC to uPD765 FDC signal mapping
-- Address decoding for ROM [cartridge](Reverse%20Engineering) slot
+- Address decoding for ROM [cartridge](Reverse%20Engineering/Cartridge.md) slot
 - DRAM bank emulation and memory upgrades
 
 ### ✅ Experiments
