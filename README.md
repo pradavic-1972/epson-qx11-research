@@ -41,6 +41,7 @@ epson-qx11-research/
 
 ### ✅ Reverse Engineering
 - GAFDDC to uPD765 FDC signal mapping
+- Makind a disk [bootable](Reverse Engineering/qx11_floppy_boot.md) on the QX-11
 - Address decoding for ROM [cartridge](Reverse%20Engineering/Cartridge.md) slot
 - DRAM bank emulation and memory upgrades
 
