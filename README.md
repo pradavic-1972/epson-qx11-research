@@ -43,7 +43,7 @@ epson-qx11-research/
 - GAFDDC to uPD765 FDC signal mapping
 - Making a disk [bootable](Reverse%20Engineering/qx11_floppy_boot.md) on the QX-11
 - Address decoding for ROM [cartridge](Reverse%20Engineering/Cartridge.md) slot
-- How the QX-11 communicates with the EPSON HD-10 external hard drive.
+- How the QX-11 communicates with the [EPSON HD-10](Reverse%20Engineering/Hard%20Drive%20access%20EPSON%20HD-10.md) external hard drive.
 - DRAM bank emulation and memory upgrades
 
 ### ✅ Experiments
