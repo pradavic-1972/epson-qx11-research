@@ -13,7 +13,7 @@ This file documents everything known so far, including interaction diagrams, VRA
 1. Overview  
 2. List of Gate Arrays  
 3. [GAVNIO](gavnio.md) – I/O & Keyboard Gate Array  
-4. GAVNIT – Interrupt & Host Timer Gate Array  
+4. [GAVNIT](gavnit.md) – Interrupt & Host Timer Gate Array  
 5. GAFDDC – Floppy Drive Control Gate Array  
 6. GAVDP – Video Display Processor Gate Array  
 7. GAVNMR – Memory Refresh Gate Array (Unknown GA)  
