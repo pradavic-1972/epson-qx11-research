@@ -78,13 +78,14 @@ Instead, it temporarily changes the mask during ISR execution to prevent re-entr
 |--------:|:----------:|--------|---------|
 | 0 | INT 70h | Power-off / shutdown | INT 70 masks all interrupts (mask→0x0000) |
 | 1 | INT 71h | System timer tick | Periodic BIOS ticker |
+| 4 | INT 74h | Floppy controller (uPD765) | uPD765 IRQ requires bit4 enabled |
 | 5 | INT 75h | Keyboard | Fires on keypress; ISR clears bit5 while running |
 | 7 | INT 77h | Built-in serial | Control block uses ports 06h–08h |
 | 9 | INT 79h | Internal modem (300 bps) | Control block uses port 19h |
-| 10 | INT 7Ah | Floppy controller (uPD765) | uPD765 IRQ requires bit10 enabled |
+| 10 | INT 7Ah | Real Time Controller (HD146818) | RTC IRQ set bit10 enable |
 | 12 | INT 7Ch | Optional serial interface | Control block uses ports 95h–96h |
 
-Unused vectors (e.g. INT 76h, 78h, 7Ah/7Bh in some configs) may exist in the IVT but point to `IRET` stubs until a subsystem installs a handler.
+Unused vectors (e.g. INT 76h, 78h, 7Bh in some configs) may exist in the IVT but point to `IRET` stubs until a subsystem installs a handler.
 
 ---
 
