@@ -38,7 +38,7 @@ public:
     // Called during INTA: returns the vector for the highest-priority pending line
     int  inta_cb(int irqline = 0);
 
-    // External sources (timer, keyboard, etc.) call this to set/clear a line (0..7)
+    // External sources (timer, keyboard, RTC, etc.) call this to set/clear a line (0..15)
     void irq_request(int line, bool state);
 
     // Convenience wrapper for the keyboard line (line 1 → INT 75h).
@@ -53,6 +53,7 @@ public:
     void set_default_step(u16 step);                           // default 0x0600
 
     void fdc_intrq_w(int state);
+    void rtc_irq_w(int state);
 
 protected:
     void device_start() override;
@@ -67,7 +68,7 @@ private:
 
     // ---- simple interrupt controller ----
     void update_intr_line();           // assert INTR if (IRR & ~IMR) != 0
-    int  highest_pending() const;      // 0..7 or -1
+    int  highest_pending() const;      // 0..15 or -1
 
     // timer/compare state
     u16 m_compare       = 0x0000;
@@ -81,16 +82,16 @@ private:
     double   m_base_hz  = 1'689'600.0;
 
     // interrupt bitmaps
-    u8 m_irr = 0x00;                   // pending (set by sources)
-    u8 m_imr = 0x00;                   // mask: 1 = masked, 0 = enabled
-    u8 m_isr = 0x00;                   // in-service (not heavily used yet)
+    u16 m_irr = 0x0000;                // pending (set by sources)
+    u16 m_imr = 0x0000;                // mask: 1 = masked, 0 = enabled
+    u16 m_isr = 0x0000;                // in-service (not heavily used yet)
 
     // mask latches as seen from ports 04h/05h
     u8 m_mask_lo = 0xFF;               // what port 04h reads back
     u8 m_mask_hi = 0xFF;               // what port 05h reads back
 
     // vectors per line
-    u8 m_vector[8] = { 0 };
+    u8 m_vector[16] = { 0 };
 
     // timer + CPU line
     emu_timer *      m_irq_timer     = nullptr;

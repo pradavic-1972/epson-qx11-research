@@ -142,6 +142,9 @@ private:
     bool     m_tx_active         = false;   // true while we’re in a frame
     bool     m_post_ready   = false;
     int      m_post_countdown = 255;
+
+    // ------ Joystick control state ------
+    bool m_joy1_enabled = false;
 };
 
 DECLARE_DEVICE_TYPE(EPSON_GAVNIO, epson_gavnio_device)

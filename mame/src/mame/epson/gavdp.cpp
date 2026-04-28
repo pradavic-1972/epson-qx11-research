@@ -1,755 +1,931 @@
 // license:BSD-3-Clause
-// Epson QX-11 GAVDP (Video Processor / Gate Array)
+// Epson QX-11 GAVDP (Video Processor / Gate Array) - alias-window model
 
 #include "emu.h"
 #include "gavdp.h"
 
+#include <algorithm>
+#include <cstdlib>
+
 DEFINE_DEVICE_TYPE(EPSON_GAVDP, gavdp_device, "epson_gavdp", "Epson QX-11 GAVDP")
 
-// ============================================================================
-//  Construction
-// ============================================================================
+namespace {
+
+bool gavdp_trace_enabled()
+{
+	static const bool enabled = std::getenv("QX11_GAVDP_TRACE") != nullptr;
+	return enabled;
+}
+
+const char *gavdp_reg_name(offs_t off)
+{
+	switch (off)
+	{
+	case 0x0c060: return "C060";
+	case 0x0c261: return "C261";
+	case 0x0c462: return "C462";
+	case 0x0c663: return "C663";
+	case 0x0d068: return "D068";
+	case 0x0d269: return "D269";
+	default: return nullptr;
+	}
+}
+
+}
 
 gavdp_device::gavdp_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock)
 	: device_t(mconfig, EPSON_GAVDP, tag, owner, clock)
 	, device_video_interface(mconfig, *this)
-	, m_screen(*this, "screen")
+	, m_screen(*this, "^screen")
 {
 }
 
-// ============================================================================
-//  device_t
-// ============================================================================
+void gavdp_device::set_screen_tag(const char *tag)
+{
+	m_screen.set_tag(tag);
+}
 
 void gavdp_device::device_start()
 {
-	// Full GAVDP VRAM window
-	m_vram.resize(VRAM_WINDOW_SIZE);
-	std::fill(m_vram.begin(), m_vram.end(), 0);
+	m_vram.assign(VRAM_CANON_SIZE, 0x00);
+	m_hidden_vram.assign(VRAM_CANON_SIZE, 0x00);
+	for (auto &plane : m_color_plane)
+		plane.assign(VRAM_CANON_SIZE, 0x00);
+	m_mmio.assign(VRAM_WINDOW_SIZE, 0x00);
+	std::fill(m_color_attr.begin(), m_color_attr.end(), 0x07);
 
-	save_item(NAME(m_vram));
-	save_item(NAME(m_vram_base));
+	// Simple 3-bit RGB palette
+	m_palette[0] = rgb_t(0x00, 0x00, 0x00);
+	m_palette[1] = rgb_t(0x00, 0x00, 0xff);
+	m_palette[2] = rgb_t(0x00, 0xff, 0x00);
+	m_palette[3] = rgb_t(0x00, 0xff, 0xff);
+	m_palette[4] = rgb_t(0xff, 0x00, 0x00);
+	m_palette[5] = rgb_t(0xff, 0x00, 0xff);
+	m_palette[6] = rgb_t(0xff, 0xff, 0x00);
+	m_palette[7] = rgb_t(0xff, 0xff, 0xff);
+
+	save_pointer(NAME(&m_vram[0]), VRAM_CANON_SIZE);
+	save_pointer(NAME(&m_hidden_vram[0]), VRAM_CANON_SIZE);
+	save_pointer(NAME(&m_color_plane[0][0]), VRAM_CANON_SIZE);
+	save_pointer(NAME(&m_color_plane[1][0]), VRAM_CANON_SIZE);
+	save_pointer(NAME(&m_color_plane[2][0]), VRAM_CANON_SIZE);
+	save_pointer(NAME(&m_mmio[0]), VRAM_WINDOW_SIZE);
+
 	save_item(NAME(m_color_mode));
-	save_item(NAME(m_visible_width));
 	save_item(NAME(m_visible_height));
 	save_item(NAME(m_visible_cols));
+	save_item(NAME(m_visible_width));
 
-	// State for CLS/scroll detection
 	save_item(NAME(m_d068_last));
-	save_item(NAME(m_clear_scroll_mode));
-	save_item(NAME(m_scroll_mode));
-
-	// Erase tracking
-	save_item(NAME(m_erase_tracking));
-	save_item(NAME(m_erase_min));
-	save_item(NAME(m_erase_max));
-	save_item(NAME(m_erase_count));
-	save_item(NAME(m_erase_min_low));
-	save_item(NAME(m_erase_max_low));
-
-	// Scroll clear logging
-	save_item(NAME(m_col_used));
-	save_item(NAME(m_col_min_idx));
-	save_item(NAME(m_col_max_idx));
 	save_item(NAME(m_reg_c663));
 	save_item(NAME(m_reg_c462));
+	save_item(NAME(m_reg_c261));
+	save_item(NAME(m_color_attr));
 
-	init_palette();
-
-	// Default: hi-res mono 640x400
-	m_color_mode     = false;
-	m_visible_cols   = 80;
-	m_visible_width  = 640;
-	m_visible_height = 400;
-
-	m_cpu_space          = nullptr;
-	m_d068_last          = 0x00;
-	m_clear_scroll_mode  = false;
-	m_scroll_mode        = false;
-
-	m_erase_tracking = false;
-	m_erase_min      = 0;
-	m_erase_max      = 0;
-	m_erase_count    = 0;
-	m_erase_min_low  = 0xff;
-	m_erase_max_low  = 0x00;
-
-	for (int col = 0; col < VRAM_COLS; ++col)
-	{
-		m_col_used[col]    = 0;
-		m_col_min_idx[col] = 0xffff;
-		m_col_max_idx[col] = 0x0000;
-	}
-
-	m_reg_c663 = 0;
-	m_reg_c462 = 0;
+	update_geometry_from_profile();
 }
 
 void gavdp_device::device_reset()
 {
-	// BIOS will rewrite D068; geometry is re-sampled each frame.
+	std::fill(m_vram.begin(), m_vram.end(), 0x00);
+	std::fill(m_hidden_vram.begin(), m_hidden_vram.end(), 0x00);
+	for (auto &plane : m_color_plane)
+		std::fill(plane.begin(), plane.end(), 0x00);
+	std::fill(m_mmio.begin(), m_mmio.end(), 0x00);
+	std::fill(m_color_attr.begin(), m_color_attr.end(), 0x07);
+
+	m_color_mode     = false;
+	m_visible_height = 400;
+	m_visible_cols   = 80;
+	m_visible_width  = 640;
+
+	m_d068_last = 0x00;
+	m_reg_c663  = 0x00;
+	m_reg_c462  = 0x00;
+	m_reg_c261  = 0x00;
+	m_trace_clear_active = false;
+	m_trace_clear_count = 0;
+	m_trace_clear_reject_count = 0;
+	m_trace_clear_zero_count = 0;
+	m_trace_clear_ff_count = 0;
+	m_trace_clear_min_x = 0;
+	m_trace_clear_max_x = 0;
+	m_trace_clear_min_y = 0;
+	m_trace_clear_max_y = 0;
+	m_trace_clear_min_off = 0;
+	m_trace_clear_max_off = 0;
+	m_trace_clear_windows = 0;
+	m_trace_clear_reject_min_off = 0;
+	m_trace_clear_reject_max_off = 0;
+	m_trace_clear_reject_samples = 0;
+	m_trace_vram_write_count = 0;
+	m_trace_vram_last_segment = 0xffffffff;
+	m_trace_vram_read_count = 0;
+	m_trace_vram_last_read_segment = 0xffffffff;
+
+	update_geometry_from_profile();
 }
 
-void gavdp_device::device_add_mconfig(machine_config &config)
-{
-	SCREEN(config, m_screen, SCREEN_TYPE_RASTER);
-
-	// Nominal timing; visible area adjusted at runtime.
-	m_screen->set_raw(14'318'180, 912, 0, 640, 449, 0, 400);
-	m_screen->set_screen_update(*this, FUNC(gavdp_device::screen_update));
-}
-
-// ============================================================================
-//  Public API
-// ============================================================================
+// -------------------------------------------------
+// Window installation
+// -------------------------------------------------
 
 void gavdp_device::install_vram_window(address_space &space, u32 base)
 {
-	m_cpu_space = &space;
-	m_vram_base = base;
-
-	space.install_readwrite_handler(
-		base,
-		base + VRAM_WINDOW_SIZE - 1,
-		read8sm_delegate(*this, FUNC(gavdp_device::vram_r)),
-		write8sm_delegate(*this, FUNC(gavdp_device::vram_w)));
+	if (base == 0x80000)
+	{
+		space.install_readwrite_handler(
+			base,
+			base + VRAM_WINDOW_SIZE - 1,
+			read8sm_delegate(*this, FUNC(gavdp_device::win_r_8000)),
+			write8sm_delegate(*this, FUNC(gavdp_device::win_w_8000)));
+	}
+	else if (base == 0x90000)
+	{
+		space.install_readwrite_handler(
+			base,
+			base + VRAM_WINDOW_SIZE - 1,
+			read8sm_delegate(*this, FUNC(gavdp_device::win_r_9000)),
+			write8sm_delegate(*this, FUNC(gavdp_device::win_w_9000)));
+	}
+	else
+	{
+		// default to 8000 view
+		space.install_readwrite_handler(
+			base,
+			base + VRAM_WINDOW_SIZE - 1,
+			read8sm_delegate(*this, FUNC(gavdp_device::win_r_8000)),
+			write8sm_delegate(*this, FUNC(gavdp_device::win_w_8000)));
+	}
 }
 
-u8 gavdp_device::vram_r(offs_t offset)
+u8  gavdp_device::win_r_8000(offs_t offset) { return win_r(false, offset); }
+void gavdp_device::win_w_8000(offs_t offset, u8 data) { win_w(false, offset, data); }
+
+u8  gavdp_device::win_r_9000(offs_t offset) { return win_r(true, offset); }
+void gavdp_device::win_w_9000(offs_t offset, u8 data) { win_w(true, offset, data); }
+
+// -------------------------------------------------
+// Decode helpers
+// -------------------------------------------------
+
+inline bool gavdp_device::color_attr_index_from_off(u32 off, u32 &idx) const
 {
-	if (offset < VRAM_WINDOW_SIZE)
-		return m_vram[offset];
-	return 0xff;
+	const u32 col = off / VRAM_CANON_BYTES_PER_COL;
+	if (col >= 80)
+		return false;
+
+	const u32 in_col = off - col * VRAM_CANON_BYTES_PER_COL;
+
+	if (in_col < 0x0100u || in_col >= 0x0100u + 200u)
+		return false;
+
+	const u32 canon_y = in_col - 0x0100u;   // 0..199
+	const u32 yblock  = canon_y >> 3;       // 0..24
+
+	idx = yblock * 80u + col;               // 0..1999
+	return true;
 }
 
-// ============================================================================
-//  Core VRAM write handler with CLS/scroll detection + scroll fix
-// ============================================================================
 
-void gavdp_device::vram_w(offs_t offset, u8 data)
+bool gavdp_device::decode_col_major(offs_t offset, u32 &xbyte, u32 &idx9) const
 {
-	// ---------------- D068: profile + bit7 = clear/scroll engine ----------
-	if (offset == REG_D068_OFFSET)
-	{
-		u8 old = m_d068_last;
-		m_d068_last = data;
+	// offset = (xbyte<<9) | idx9
+	xbyte = (u32)((offset >> 9) & 0x7f);
+	idx9  = (u32)(offset & 0x1ff);
 
-		bool old_clear = (old & 0x80) != 0;
-		bool new_clear = (data & 0x80) != 0;
+	if (xbyte >= (u32)VRAM_COLS)
+		return false;
 
-		// Rising edge: enter clear/scroll phase
-		if (!old_clear && new_clear)
-		{
-			m_clear_scroll_mode = true;
-			m_scroll_mode       = false;   // assume CLS until we see C663
+	// Canonical halves are top 0..0x0c7 and bottom 0x100..0x1c7.
+	if (idx9 > 0x1c7)
+		return false;
 
-			// start counting zeros for this pass
-			m_erase_tracking = true;
-			m_erase_count    = 0;
-			m_erase_min      = 0;
-			m_erase_max      = 0;
-			m_erase_min_low  = 0xff;
-			m_erase_max_low  = 0x00;
+	return true;
+}
 
-			// reset per-column tracking
-			for (int col = 0; col < VRAM_COLS; ++col)
-			{
-				m_col_used[col]    = 0;
-				m_col_min_idx[col] = 0xffff;
-				m_col_max_idx[col] = 0x0000;
-			}
-		}
-
-	if (old_clear && !new_clear)
+bool gavdp_device::decode_row_major(bool is_9000, offs_t offset, u32 &xbyte, u32 &canon_y) const
 {
-	if (m_erase_tracking)
+	offs_t decode_offset = offset;
+	if (is_9000 && m_visible_height == 200)
 	{
-		logerror("GAVDP: CLEAR pass end (scroll=%d) zeros=%u\n",
-		         (int)m_scroll_mode, m_erase_count);
-
-		if (m_scroll_mode)
-		{
-			// SCROLL CASE
-			logerror("GAVDP: SCROLL C663=%02X C462=%02X zeros=%u\n",
-			         m_reg_c663, m_reg_c462, m_erase_count);
-
-			if (m_erase_count >= 1200 && m_erase_count <= 1600)
-				clear_scroll_bottom_band_for_columns();
-
-			for (int col = 0; col < VRAM_COLS; ++col)
-			{
-				if (!m_col_used[col])
-					continue;
-
-				logerror("GAVDP: SCROLL col=%02d idx=%03X..%03X\n",
-				         col,
-				         (unsigned)m_col_min_idx[col],
-				         (unsigned)m_col_max_idx[col]);
-			}
-		}
+		const u32 raw_x = (u32)(decode_offset & 0xff);
+		if (raw_x >= 0x80u && raw_x < 0x80u + (u32)VRAM_COLS)
+			decode_offset -= 0x80;
+		else if (decode_offset >= 0x100)
+			decode_offset -= 0x100;
 		else
-		{
-			// NON-SCROLL: either full CLS or smaller window
-			if (m_erase_count >= 31840)
-			{
-				// Full-screen CLS
-				logerror("GAVDP: CLS heuristic (zeros=%u) → clear_text_vram()\n",
-				         m_erase_count);
-				clear_text_vram();
-			}
-			else
-			{
-				// *** WINDOW CLEAR ***
-				logerror("GAVDP: WINDOW CLEAR zeros=%u (no CLS)\n",
-				         m_erase_count);
-
-				// For debugging: geometry summary
-				int used_cols = 0;
-				int first_col = -1;
-				int last_col  = -1;
-				for (int col = 0; col < VRAM_COLS; ++col)
-				{
-					if (!m_col_used[col])
-						continue;
-
-					if (first_col < 0)
-						first_col = col;
-					last_col = col;
-					used_cols++;
-
-					logerror("GAVDP: WINDOW col=%02d idx=%03X..%03X\n",
-					         col,
-					         (unsigned)m_col_min_idx[col],
-					         (unsigned)m_col_max_idx[col]);
-				}
-
-				logerror("GAVDP: WINDOW summary cols=%d range=%02d..%02d zeros=%u\n",
-				         used_cols, first_col, last_col, m_erase_count);
-
-				// Perform a logical rectangular clear based on the GA's band info.
-				clear_window_from_ga();
-			}
-		}
+			return false;
 	}
 
-	// reset flags for next pass
-	m_clear_scroll_mode = false;
-	m_scroll_mode       = false;
-	m_erase_tracking    = false;
-	m_erase_count       = 0;
+	xbyte = (u32)(decode_offset & 0xff);
+	const u32 y = (u32)((decode_offset >> 8) & 0xff);
+
+	if (xbyte >= (u32)VRAM_COLS)
+		return false;
+	if (y >= 200u)
+		return false;
+
+	canon_y = (is_9000 && m_visible_height != 200) ? (200u + y) : y;
+	return true;
 }
 
-
-
-		// store D068 itself
-		if (offset < VRAM_WINDOW_SIZE)
-			m_vram[offset] = data;
-
-		logerror("GAVDP: D068 write @%05X = %02X (clear_scroll=%d, scroll=%d)\n",
-		         (unsigned)offset, data,
-		         (int)m_clear_scroll_mode, (int)m_scroll_mode);
-		return;
-	}
-
-	// ---------------- C663: scroll index ------------------------------------
-	if (offset == REG_C663_OFFSET)
-	{
-		m_reg_c663 = data; // track latest scroll index
-
-		// Any C663 write during clear/scroll marks this pass as scroll
-		if (m_clear_scroll_mode)
-			m_scroll_mode = true;
-
-		if (offset < VRAM_WINDOW_SIZE)
-			m_vram[offset] = data;
-
-		logerror("GAVDP: C663 write @%05X = %02X (clear_scroll=%d, scroll=%d)\n",
-		         (unsigned)offset, data,
-		         (int)m_clear_scroll_mode, (int)m_scroll_mode);
-		return;
-	}
-
-	// ---------------- C462: scroll phase helper -----------------------------
-	if (offset == REG_C462_OFFSET)
-	{
-		m_reg_c462 = data; // track latest phase/flag
-
-		if (offset < VRAM_WINDOW_SIZE)
-			m_vram[offset] = data;
-
-		logerror("GAVDP: C462 write @%05X = %02X (clear_scroll=%d, scroll=%d)\n",
-		         (unsigned)offset, data,
-		         (int)m_clear_scroll_mode, (int)m_scroll_mode);
-		return;
-	}
-
-	// ---------------- D269: attribute register ------------------------------
-	if (offset == REG_D269_OFFSET)
-	{
-		if (offset < VRAM_WINDOW_SIZE)
-			m_vram[offset] = data;
-
-		logerror("GAVDP: D269 write @%05X = %02X\n", (unsigned)offset, data);
-		return;
-	}
-
-	// ---------------- Other GAVDP regs: log + store -------------------------
-	if (offset == REG_C060_OFFSET ||
-	    offset == REG_C261_OFFSET ||
-	    offset == REG_D46A_OFFSET ||
-	    offset == REG_C864_OFFSET ||
-	    offset == REG_CA65_OFFSET ||
-	    offset == REG_CC66_OFFSET ||
-	    offset == REG_CE67_OFFSET)
-	{
-		if (offset < VRAM_WINDOW_SIZE)
-			m_vram[offset] = data;
-
-		logerror("GAVDP: REG write @%05X = %02X\n", (unsigned)offset, data);
-		return;
-	}
-
-	// ---------------- Default: normal VRAM write ----------------------------
-if (offset < VRAM_WINDOW_SIZE)
+bool gavdp_device::decode_mode_set_clear_alias(bool is_9000, offs_t offset, u32 &xbyte, u32 &y) const
 {
-	// Count and track zero writes only while clear/scroll is active
-	if (m_clear_scroll_mode && m_erase_tracking && data == 0x00)
-	{
-		m_erase_count++;
+	if (!is_9000)
+		return false;
 
-		// Column and index within column (0..79, 0..0x1FF)
-		u32 col = offset / VRAM_BYTES_PER_COL;
-		u16 idx = offset % VRAM_BYTES_PER_COL;
+	const u32 raw_x = (u32)(offset & 0xff);
+	if (raw_x < 0x80u || raw_x >= 0x80u + (u32)VRAM_COLS)
+		return false;
 
-		if (col < VRAM_COLS)
-		{
-			m_col_used[col] = 1;
-			if (idx < m_col_min_idx[col])
-				m_col_min_idx[col] = idx;
-			if (idx > m_col_max_idx[col])
-				m_col_max_idx[col] = idx;
-		}
+	y = (u32)((offset >> 8) & 0xff);
+	if (y >= 200u)
+		return false;
 
-		u8 low = (u8)(offset & 0xff);
-		if (m_erase_min == 0 && m_erase_count == 1)
-			m_erase_min = offset;
-		if (offset > m_erase_max)
-			m_erase_max = offset;
-		if (low < m_erase_min_low)
-			m_erase_min_low = low;
-		if (low > m_erase_max_low)
-			m_erase_max_low = low;
-
-		// IMPORTANT:
-		// During any GA clear pass (scroll / window / CLS),
-		// we DO NOT apply the zero writes directly.
-		// We emulate the clear logically at the end of the pass.
-		return;
-	}
-
-	// Normal write (non-zero or not in clear pass)
-	m_vram[offset] = data;
-}
+	xbyte = raw_x - 0x80u;
+	return true;
 }
 
-// ============================================================================
-//  Window helper: clear GA-defined rectangle (small menu/window erases)
-// ============================================================================
-//
-// We use the GA's band info (m_col_used[], m_col_min_idx[], m_col_max_idx[])
-// accumulated during a WINDOW CLEAR pass, but instead of just taking the
-// outermost min/max (which pulls in noise), we:
-//
-//  1) Find the *longest contiguous run* of columns where m_col_used[col] == 1.
-//  2) Compute vmin/vmax only over that run.
-//  3) Clear a solid band for that run.
-//
-// This usually matches the actual menu window and avoids stray columns/rows
-// that make the rectangle too big or slightly shifted.
-//
+// -------------------------------------------------
+// MMIO helpers
+// -------------------------------------------------
 
-void gavdp_device::clear_window_from_ga()
+inline u8 gavdp_device::reg_read(offs_t off) const
 {
-	if (m_vram.empty())
-		return;
-
-	// --- 1) Find the longest run of used columns ---
-	int best_start = -1;
-	int best_len   = 0;
-
-	int col = 0;
-	while (col < VRAM_COLS)
-	{
-		// skip unused columns
-		while (col < VRAM_COLS && !m_col_used[col])
-			col++;
-
-		if (col >= VRAM_COLS)
-			break;
-
-		int run_start = col;
-		int run_len   = 0;
-
-		// count contiguous used columns
-		while (col < VRAM_COLS && m_col_used[col])
-		{
-			run_len++;
-			col++;
-		}
-
-		if (run_len > best_len)
-		{
-			best_len   = run_len;
-			best_start = run_start;
-		}
-	}
-
-	if (best_start < 0 || best_len <= 0)
-	{
-		logerror("GAVDP: clear_window_from_ga: no contiguous used columns, nothing to do\n");
-		return;
-	}
-
-	int first_col = best_start;
-	int last_col  = best_start + best_len - 1;
-
-	// --- 2) Compute vertical band only over that run ---
-	u16 vmin = 0x1FF;
-	u16 vmax = 0x000;
-
-	for (int c = first_col; c <= last_col; ++c)
-	{
-		if (!m_col_used[c])
-			continue;
-
-		if (m_col_min_idx[c] < vmin)
-			vmin = m_col_min_idx[c];
-		if (m_col_max_idx[c] > vmax)
-			vmax = m_col_max_idx[c];
-	}
-
-	if (vmin > vmax)
-	{
-		logerror("GAVDP: clear_window_from_ga: invalid vmin/vmax (%03X..%03X)\n",
-		         (unsigned)vmin, (unsigned)vmax);
-		return;
-	}
-
-	// Clamp to our per-column VRAM range.
-	if (vmax >= VRAM_BYTES_PER_COL)
-		vmax = VRAM_BYTES_PER_COL - 1;
-
-	int cleared_cols  = 0;
-	int cleared_lines = vmax - vmin + 1;
-
-	// --- 3) Clear the solid band within that run ---
-	for (int c = first_col; c <= last_col; ++c)
-	{
-		if (!m_col_used[c])
-			continue;
-
-		++cleared_cols;
-		u32 col_base = c * VRAM_BYTES_PER_COL;
-
-		for (u16 idx = vmin; idx <= vmax; ++idx)
-		{
-			u32 offset = col_base + idx;
-			if (offset < m_vram.size())
-				m_vram[offset] = 0x00;
-		}
-	}
-
-	logerror("GAVDP: Window band cleared cols=%d (%d..%d) idx=%03X..%03X (lines≈%d)\n",
-	         cleared_cols, first_col, last_col,
-	         (unsigned)vmin, (unsigned)vmax, cleared_lines);
-}
-
-// ============================================================================
-//  CLS helper: clear text VRAM region for this mode
-// ============================================================================
-
-void gavdp_device::clear_text_vram()
-{
-	if (m_vram.empty())
-		return;
-
-	// This is your "full erase" pattern for mono text:
-	// clear 0x80–0xCF in each 0x100-byte band, up to 0x8E80.
-	for (u32 base = 0x0000; base <= 0xCBFF; base += 0x0100)
-	{
-		u32 start = base;
-		u32 end   = base + 0x00FF; // 0x80..0xCF → 80 bytes
-
-		if (start >= m_vram.size())
-			break;
-
-		if (end >= m_vram.size())
-			end = m_vram.size() - 1;
-
-		for (u32 off = start; off <= end; ++off)
-			m_vram[off] = 0x00;
-	}
-
-	logerror("GAVDP: CLS emulated (cleared bands 0x0080–0x8ECF, step 0x100)\n");
-}
-
-// ============================================================================
-//  Scroll helper: clear logical bottom row (16-pixel band) for touched columns
-// ============================================================================
-
-void gavdp_device::clear_scroll_bottom_band_for_columns()
-{
-	if (m_vram.empty())
-		return;
-
-	const int height       = m_visible_height;         // 400 (mono) or 200 (color)
-	const int total_lines  = height;
-	const int band_height  = 16;                       // one text row
-	const int bottom_start = height - band_height;     // e.g. 384 for 400-line
-
-	u8 scroll_px = vram_byte(REG_C663_OFFSET);
-
-	int cleared_cols = 0;
-
-	for (int col = 0; col < m_visible_cols && col < VRAM_COLS; ++col)
-	{
-		if (!m_col_used[col])
-			continue;
-
-		++cleared_cols;
-
-		u32 col_base = col * VRAM_BYTES_PER_COL;
-
-		for (int y = bottom_start; y < height; ++y)
-		{
-			int scrolled_y = y + scroll_px;
-			while (scrolled_y >= total_lines)
-				scrolled_y -= total_lines;
-
-			int scan_index;
-			if (!m_color_mode)
-			{
-				// mono 640x400: split 0..199 / 200..399 across 0x000/0x100 bands
-				if (scrolled_y < 200)
-					scan_index = scrolled_y;                 // 0x000..0x00C7
-				else
-					scan_index = 0x100 + (scrolled_y - 200); // 0x0100..0x01C7
-			}
-			else
-			{
-				// color 640x200: single 0x000..0x00C7 band
-				scan_index = scrolled_y;
-			}
-
-			u32 offset = col_base + scan_index;
-			if (offset < m_vram.size())
-				m_vram[offset] = 0x00;
-		}
-	}
-
-	logerror("GAVDP: Scroll bottom band cleared for %d columns (height=%d, scroll=%02X)\n",
-	         cleared_cols, height, scroll_px);
-}
-
-// ============================================================================
-//  Screen update
-// ============================================================================
-
-u32 gavdp_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
-{
-	update_geometry_from_profile();
-	render_framebuffer(bitmap, cliprect);
-	return 0;
-}
-
-// ============================================================================
-//  Helpers
-// ============================================================================
-
-void gavdp_device::init_palette()
-{
-	// Very simple 8-color RGB palette for now.
-	m_palette[0] = rgb_t(0x00, 0x00, 0x00); // black
-	m_palette[1] = rgb_t(0x00, 0x00, 0xff); // blue
-	m_palette[2] = rgb_t(0x00, 0xff, 0x00); // green
-	m_palette[3] = rgb_t(0x00, 0xff, 0xff); // cyan
-	m_palette[4] = rgb_t(0xff, 0x00, 0x00); // red
-	m_palette[5] = rgb_t(0xff, 0x00, 0xff); // magenta
-	m_palette[6] = rgb_t(0xff, 0xff, 0x00); // yellow
-	m_palette[7] = rgb_t(0xff, 0xff, 0xff); // white
-}
-
-inline u8 gavdp_device::vram_byte(u32 offset) const
-{
-	if (offset < m_vram.size())
-		return m_vram[offset];
+	if ((u32)off < (u32)m_mmio.size())
+		return m_mmio[off];
 	return 0xff;
 }
 
-inline u8 &gavdp_device::vram_byte_ref(u32 offset)
+inline void gavdp_device::reg_write(offs_t off, u8 data)
 {
-	static u8 dummy = 0xff;
-	if (offset < m_vram.size())
-		return m_vram[offset];
-	return dummy;
+	const u8 old = reg_read(off);
+	if (gavdp_trace_enabled())
+	{
+		if (const char *name = gavdp_reg_name(off))
+		{
+			if (old != data)
+			{
+				logerror("GAVDP REG %s %02x -> %02x (D068=%02x C060=%02x C663=%02x C462=%02x C261=%02x D269=%02x)\n",
+						name, old, data,
+						reg_read(REG_D068_OFFSET), reg_read(REG_C060_OFFSET), reg_read(REG_C663_OFFSET),
+						reg_read(REG_C462_OFFSET), reg_read(REG_C261_OFFSET),
+						reg_read(REG_D269_OFFSET));
+			}
+		}
+	}
+
+	if ((u32)off < (u32)m_mmio.size())
+		m_mmio[off] = data;
+
+	if (off == REG_D068_OFFSET)
+		m_d068_last = data;
+	else if (off == REG_C663_OFFSET)
+		m_reg_c663 = data;
+	else if (off == REG_C462_OFFSET)
+		m_reg_c462 = data;
+	else if (off == REG_C261_OFFSET)
+		m_reg_c261 = data;
 }
 
 void gavdp_device::update_geometry_from_profile()
 {
-	u8 prof_raw = vram_byte(REG_D068_OFFSET);
-	u8 prof     = prof_raw & 0x7f; // ignore bit7 (CLS/scroll) for geometry
+	const u8 prof_raw = reg_read(REG_D068_OFFSET);
+	const u8 cols = reg_read(REG_C060_OFFSET);
+	const u8 c261 = reg_read(REG_C261_OFFSET);
+	const u8 prof     = prof_raw & 0x7f;
 
 	bool new_color  = m_color_mode;
 	int  new_height = m_visible_height;
+	int  new_cols   = m_visible_cols;
 
-	if (prof == 2)      // hi-res mono 640x400
+
+	if (prof == 2)
 	{
 		new_color  = false;
-		new_height = 400;
+		new_height = (c261 & 0x01) ? 200 : 400;
+		new_cols   = (cols == 0x11) ? 40 : 80;
 	}
-	else if (prof == 7) // color 640x200
+	else if (prof == 7 || prof == 3 || prof == 5)
 	{
 		new_color  = true;
 		new_height = 200;
+		new_cols   = 80;
+	}
+	else
+	{
+		// safe default
+		new_color  = false;
+		new_height = 400;
+		new_cols   = 80;
 	}
 
-	int new_cols  = 80;
-	int new_width = new_cols * 8;
+	if (cols == 0x11)
+		new_cols = 40;
 
-	if (new_color != m_color_mode ||
-	    new_height != m_visible_height ||
-	    new_cols != m_visible_cols)
+	const int new_width = new_cols * 8;
+
+	if (new_color != m_color_mode || new_height != m_visible_height || new_cols != m_visible_cols)
 	{
+		if (gavdp_trace_enabled())
+		{
+			logerror("GAVDP GEOMETRY %dx%d %s -> %dx%d %s (D068=%02x C060=%02x C261=%02x C663=%02x C462=%02x)\n",
+					m_visible_width, m_visible_height, m_color_mode ? "color" : "mono",
+					new_width, new_height, new_color ? "color" : "mono",
+					prof_raw, cols, c261, reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET));
+		}
+
 		m_color_mode     = new_color;
 		m_visible_height = new_height;
 		m_visible_cols   = new_cols;
 		m_visible_width  = new_width;
+		m_trace_vram_write_count = 0;
+		m_trace_vram_last_segment = 0xffffffff;
+		m_trace_vram_read_count = 0;
+		m_trace_vram_last_read_segment = 0xffffffff;
 
-		if (m_screen)
-			m_screen->set_visible_area(0, m_visible_width - 1, 0, m_visible_height - 1);
+		m_screen->set_visible_area(0, m_visible_width - 1, 0, m_visible_height - 1);
 	}
+
+	m_d068_last = prof_raw;
 }
 
-// ============================================================================
-//  Rendering – common
-// ============================================================================
-
-void gavdp_device::render_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect)
+int gavdp_device::effective_scroll_px() const
 {
-	bitmap.fill(rgb_t::black(), cliprect);
+    const u32 c663 = reg_read(REG_C663_OFFSET) & 0xff;
+    const u32 c462 = reg_read(REG_C462_OFFSET) & 0xff;
 
-	if (m_color_mode)
-		render_mode_color(bitmap, cliprect);
-	else
-		render_mode_mono(bitmap, cliprect);
+	 
+    return (c663 + ((c462 & 0x80) ? 200u : 0u)) % 400u;
+	
 }
 
-// ============================================================================
-//  Rendering – mono (640x400, simple pixel scroll with C663)
-// ============================================================================
+void gavdp_device::trace_clear_write(bool is_9000, offs_t offset, u8 data, u32 xbyte, u32 canon_y)
+{
+	if (!gavdp_trace_enabled())
+		return;
+
+	if (!m_trace_clear_active)
+	{
+		m_trace_clear_active = true;
+		m_trace_clear_count = 0;
+		m_trace_clear_reject_count = 0;
+		m_trace_clear_zero_count = 0;
+		m_trace_clear_ff_count = 0;
+		m_trace_clear_min_x = xbyte;
+		m_trace_clear_max_x = xbyte;
+		m_trace_clear_min_y = canon_y;
+		m_trace_clear_max_y = canon_y;
+		m_trace_clear_min_off = offset;
+		m_trace_clear_max_off = offset;
+		m_trace_clear_windows = 0;
+		m_trace_clear_reject_min_off = 0;
+		m_trace_clear_reject_max_off = 0;
+		m_trace_clear_reject_samples = 0;
+		logerror("GAVDP CLEAR begin D068=%02x C663=%02x C462=%02x scroll_px=%d\n",
+				reg_read(REG_D068_OFFSET), reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET),
+				effective_scroll_px());
+	}
+
+	m_trace_clear_count++;
+	if (data == 0x00)
+		m_trace_clear_zero_count++;
+	else if (data == 0xff)
+		m_trace_clear_ff_count++;
+
+	m_trace_clear_min_x = std::min(m_trace_clear_min_x, xbyte);
+	m_trace_clear_max_x = std::max(m_trace_clear_max_x, xbyte);
+	m_trace_clear_min_y = std::min(m_trace_clear_min_y, canon_y);
+	m_trace_clear_max_y = std::max(m_trace_clear_max_y, canon_y);
+	m_trace_clear_min_off = std::min(m_trace_clear_min_off, (u32)offset);
+	m_trace_clear_max_off = std::max(m_trace_clear_max_off, (u32)offset);
+	m_trace_clear_windows |= is_9000 ? 2u : 1u;
+}
+
+void gavdp_device::trace_clear_reject(bool is_9000, offs_t offset, u8 data)
+{
+	if (!gavdp_trace_enabled())
+		return;
+
+	if (!m_trace_clear_active)
+	{
+		m_trace_clear_active = true;
+		m_trace_clear_count = 0;
+		m_trace_clear_reject_count = 0;
+		m_trace_clear_zero_count = 0;
+		m_trace_clear_ff_count = 0;
+		m_trace_clear_min_x = 0;
+		m_trace_clear_max_x = 0;
+		m_trace_clear_min_y = 0;
+		m_trace_clear_max_y = 0;
+		m_trace_clear_min_off = 0;
+		m_trace_clear_max_off = 0;
+		m_trace_clear_windows = 0;
+		m_trace_clear_reject_min_off = (u32)offset;
+		m_trace_clear_reject_max_off = (u32)offset;
+		m_trace_clear_reject_samples = 0;
+		logerror("GAVDP CLEAR begin D068=%02x C663=%02x C462=%02x scroll_px=%d\n",
+				reg_read(REG_D068_OFFSET), reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET),
+				effective_scroll_px());
+	}
+
+	m_trace_clear_reject_count++;
+	if (m_trace_clear_reject_samples < 16)
+	{
+		logerror("GAVDP CLEAR reject sample off=%04x data=%02x window=%s raw_y=%02x raw_x=%02x\n",
+				(u32)offset, data, is_9000 ? "9000" : "8000",
+				(u32)((offset >> 8) & 0xff), (u32)(offset & 0xff));
+		m_trace_clear_reject_samples++;
+	}
+	m_trace_clear_reject_min_off = std::min(m_trace_clear_reject_min_off, (u32)offset);
+	m_trace_clear_reject_max_off = std::max(m_trace_clear_reject_max_off, (u32)offset);
+	m_trace_clear_windows |= is_9000 ? 2u : 1u;
+}
+
+void gavdp_device::trace_flush_clear(const char *reason)
+{
+	if (!gavdp_trace_enabled() || !m_trace_clear_active)
+		return;
+
+	logerror("GAVDP CLEAR end reason=%s decoded=%llu rejected=%llu zero=%llu ff=%llu other=%llu x=%u..%u canon_y=%u..%u offsets=%04x..%04x reject_offsets=%04x..%04x windows=%s%s D068=%02x C663=%02x C462=%02x scroll_px=%d\n",
+			reason,
+			(unsigned long long)m_trace_clear_count,
+			(unsigned long long)m_trace_clear_reject_count,
+			(unsigned long long)m_trace_clear_zero_count,
+			(unsigned long long)m_trace_clear_ff_count,
+			(unsigned long long)(m_trace_clear_count - m_trace_clear_zero_count - m_trace_clear_ff_count),
+			m_trace_clear_min_x, m_trace_clear_max_x,
+			m_trace_clear_min_y, m_trace_clear_max_y,
+			m_trace_clear_min_off, m_trace_clear_max_off,
+			m_trace_clear_reject_min_off, m_trace_clear_reject_max_off,
+			(m_trace_clear_windows & 1u) ? "8000" : "",
+			(m_trace_clear_windows == 3u) ? "+9000" : ((m_trace_clear_windows & 2u) ? "9000" : ""),
+			reg_read(REG_D068_OFFSET), reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET),
+			effective_scroll_px());
+
+	m_trace_clear_active = false;
+}
+
+void gavdp_device::trace_vram_write(const char *mode, const char *target, bool is_9000, offs_t offset, offs_t decode_offset, u8 data, u32 xbyte, u32 y_or_idx, u32 canon_y)
+{
+	if (!gavdp_trace_enabled() || m_visible_height != 200)
+		return;
+
+	const u32 phys = (is_9000 ? 0x90000u : 0x80000u) + (u32)offset;
+	const u32 seg = phys >> 4;
+	const u32 off16 = phys & 0x0f;
+	const bool log_sample = m_color_mode || (m_trace_vram_write_count < 512) || (seg != m_trace_vram_last_segment);
+
+	if (log_sample)
+	{
+		logerror("GAVDP VRAMW #%u mode=%s target=%s win=%s raw=%04x equiv=%04x:%04x decode=%04x x=%02x yidx=%03x canon_y=%03x data=%02x D068=%02x C060=%02x C261=%02x C663=%02x C462=%02x D269=%02x\n",
+				m_trace_vram_write_count, mode, target, is_9000 ? "9000" : "8000",
+				(u32)offset, seg, off16, (u32)decode_offset, xbyte, y_or_idx, canon_y, data,
+				reg_read(REG_D068_OFFSET), reg_read(REG_C060_OFFSET), reg_read(REG_C261_OFFSET),
+				reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET), reg_read(REG_D269_OFFSET));
+	}
+
+	m_trace_vram_last_segment = seg;
+	m_trace_vram_write_count++;
+}
+
+void gavdp_device::trace_vram_read(const char *mode, const char *target, bool is_9000, offs_t offset, offs_t decode_offset, u8 data, u32 xbyte, u32 y_or_idx, u32 canon_y)
+{
+	if (!gavdp_trace_enabled() || !m_color_mode || m_visible_height != 200)
+		return;
+
+	const u32 phys = (is_9000 ? 0x90000u : 0x80000u) + (u32)offset;
+	const u32 seg = phys >> 4;
+	const u32 off16 = phys & 0x0f;
+	const bool log_sample = (m_trace_vram_read_count < 4096) || (seg != m_trace_vram_last_read_segment);
+
+	if (log_sample)
+	{
+		logerror("GAVDP VRAMR #%u mode=%s target=%s win=%s raw=%04x equiv=%04x:%04x decode=%04x x=%02x yidx=%03x canon_y=%03x data=%02x D068=%02x C060=%02x C261=%02x C663=%02x C462=%02x D269=%02x\n",
+				m_trace_vram_read_count, mode, target, is_9000 ? "9000" : "8000",
+				(u32)offset, seg, off16, (u32)decode_offset, xbyte, y_or_idx, canon_y, data,
+				reg_read(REG_D068_OFFSET), reg_read(REG_C060_OFFSET), reg_read(REG_C261_OFFSET),
+				reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET), reg_read(REG_D269_OFFSET));
+	}
+
+	m_trace_vram_last_read_segment = seg;
+	m_trace_vram_read_count++;
+}
+
+// -------------------------------------------------
+// Read/write handlers
+// -------------------------------------------------
+
+u8 gavdp_device::win_r(bool is_9000, offs_t offset)
+{
+	const bool clear_mode = (m_d068_last & 0x80) != 0;
+
+	// In clear/scroll mode, row-major bitmap addressing takes priority over
+	// the MMIO split so offsets 0xC000..0xC74F can still address scanlines
+	// 192..199. Register offsets are protected by xbyte < 80.
+	if (clear_mode)
+	{
+		if (m_color_mode)
+		{
+			offs_t decode_offset = offset;
+			const u32 raw_x = (u32)(offset & 0xff);
+			int plane = -1;
+
+			if (is_9000)
+			{
+				// Color pixel/rectangle helpers use 9000:yyyy as one direct plane.
+				plane = 1;
+			}
+			else if (raw_x >= 0x80u && raw_x < 0x80u + (u32)VRAM_COLS)
+			{
+				// 8008:yyyy reaches this aperture with the low byte biased by 0x80.
+				decode_offset -= 0x80;
+				plane = 2;
+			}
+			else
+			{
+				// 8000:yyyy is the third direct plane.
+				plane = 0;
+			}
+
+			const u32 xbyte = (u32)(decode_offset & 0xff);
+			const u32 y = (u32)((decode_offset >> 8) & 0xff);
+			if (plane >= 0 && xbyte < (u32)VRAM_COLS && y < 200u)
+			{
+				const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + y;
+				const u8 data = (off < m_color_plane[plane].size()) ? m_color_plane[plane][off] : 0x00;
+				trace_vram_read("row", plane == 0 ? "color_plane_8000" : (plane == 1 ? "color_plane_9000" : "color_plane_8008"),
+						is_9000, offset, decode_offset, data, xbyte, y, y);
+				return data;
+			}
+		}
+
+		u32 xbyte = 0, canon_y = 0;
+		if (decode_row_major(is_9000, offset, xbyte, canon_y))
+		{
+			const u32 idx = (canon_y < 200u) ? canon_y : (0x100u + (canon_y - 200u));
+			const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + idx;
+			const u8 data = (off < m_vram.size()) ? m_vram[off] : 0x00;
+			const bool use_9008_page = is_9000 && m_visible_height == 200
+					&& ((offset & 0xff) >= 0x80) && ((offset & 0xff) < 0x80 + VRAM_COLS);
+			offs_t decode_offset = offset;
+			if (use_9008_page)
+				decode_offset -= 0x80;
+			else if (is_9000 && m_visible_height == 200 && decode_offset >= 0x100)
+				decode_offset -= 0x100;
+			trace_vram_read("row", use_9008_page ? "vram_9008_alias" : "vram", is_9000, offset, decode_offset, data, xbyte, idx, canon_y);
+			return data;
+		}
+	}
+
+	// MMIO region (register space)
+	if (offset >= VRAM_MMIO_SPLIT)
+		return reg_read(offset);
+
+	// Normal mode: canonical column-major bitmap region (0x0000..0x9FFF)
+	if (offset < VRAM_CANON_LIMIT)
+	{
+		if (m_color_mode)
+		{
+			const bool latch_9010 = is_9000 && offset >= 0x100;
+			const bool plane_8010 = !is_9000 && offset >= 0x100;
+			const offs_t decode_offset = (latch_9010 || plane_8010) ? (offset - 0x100) : offset;
+			u32 xbyte = 0, idx9 = 0;
+			if (!decode_col_major(decode_offset, xbyte, idx9))
+				return 0x00;
+
+			const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + idx9;
+			if (latch_9010)
+			{
+				const u8 data = (off < m_vram.size()) ? m_vram[off] : 0x00;
+				trace_vram_read("col", "color_latch_9010", is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+				return data;
+			}
+
+			const u32 plane = plane_8010 ? 0 : (is_9000 ? 1 : 2);
+			const u8 data = (off < m_color_plane[plane].size()) ? m_color_plane[plane][off] : 0x00;
+			trace_vram_read("col", plane == 0 ? "color_plane_8010" : (plane == 1 ? "color_plane_9000" : "color_plane_8000"),
+					is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+			return data;
+		}
+
+		const bool visible_9010_200 = is_9000 && m_visible_height == 200 && offset >= 0x100;
+		const offs_t decode_offset = visible_9010_200 ? (offset - 0x100) : offset;
+		u32 xbyte = 0, idx9 = 0;
+		if (!decode_col_major(decode_offset, xbyte, idx9))
+			return 0x00;
+
+		const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + idx9;
+		if (is_9000 && !visible_9010_200)
+		{
+			const u8 data = (off < m_hidden_vram.size()) ? m_hidden_vram[off] : 0x00;
+			trace_vram_read("col", "hidden_9000", is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+			return data;
+		}
+		const u8 data = (off < m_vram.size()) ? m_vram[off] : 0x00;
+		trace_vram_read("col", visible_9010_200 ? "vram_9010" : "vram", is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+		return data;
+	}
+
+	// Fallback: treat as MMIO backing store
+	return reg_read(offset);
+}
+
+void gavdp_device::win_w(bool is_9000, offs_t offset, u8 data)
+{
+	const bool clear_mode = (m_d068_last & 0x80) != 0;
+	auto color_latch_expand = [this] (u32 off, u8 data)
+	{
+		if (off >= m_vram.size())
+			return;
+
+		m_vram[off] = data;
+
+		const u8 attr = reg_read(REG_D269_OFFSET) & 0x77;
+		const u8 fg = attr & 0x07;
+		const u8 bg = (attr >> 4) & 0x07;
+		const u8 inv = data ^ 0xff;
+
+		for (u32 plane = 0; plane < 3; plane++)
+		{
+			u8 expanded = 0x00;
+			if (BIT(fg, plane))
+				expanded |= data;
+			if (BIT(bg, plane))
+				expanded |= inv;
+			m_color_plane[plane][off] = expanded;
+		}
+	};
+
+	if ((reg_read(REG_D068_OFFSET) & 0x7f) == 7)
+	{
+		u32 idx;
+		if (color_attr_index_from_off(offset, idx))
+			m_color_attr[idx] = reg_read(REG_D269_OFFSET) & 0x77;
+	}
+
+	if (clear_mode)
+	{
+		if (m_color_mode)
+		{
+			offs_t decode_offset = offset;
+			const u32 raw_x = (u32)(offset & 0xff);
+			int plane = -1;
+
+			if (is_9000)
+			{
+				plane = 1;
+			}
+			else if (raw_x >= 0x80u && raw_x < 0x80u + (u32)VRAM_COLS)
+			{
+				decode_offset -= 0x80;
+				plane = 2;
+			}
+			else
+			{
+				plane = 0;
+			}
+
+			const u32 xbyte = (u32)(decode_offset & 0xff);
+			const u32 y = (u32)((decode_offset >> 8) & 0xff);
+			if (plane >= 0 && xbyte < (u32)VRAM_COLS && y < 200u)
+			{
+				const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + y;
+				trace_clear_write(is_9000, offset, data, xbyte, y);
+				trace_vram_write("row", plane == 0 ? "color_plane_8000" : (plane == 1 ? "color_plane_9000" : "color_plane_8008"),
+						is_9000, offset, decode_offset, data, xbyte, y, y);
+				if (off < m_color_plane[plane].size())
+					m_color_plane[plane][off] = data;
+				return;
+			}
+		}
+
+		u32 xbyte = 0, canon_y = 0;
+		if (decode_row_major(is_9000, offset, xbyte, canon_y))
+		{
+			trace_clear_write(is_9000, offset, data, xbyte, canon_y);
+			const u32 idx = (canon_y < 200u) ? canon_y : (0x100u + (canon_y - 200u));
+			const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + idx;
+			const bool use_9008_page = is_9000 && m_visible_height == 200
+					&& ((offset & 0xff) >= 0x80) && ((offset & 0xff) < 0x80 + VRAM_COLS);
+			offs_t decode_offset = offset;
+			if (use_9008_page)
+				decode_offset -= 0x80;
+			else if (is_9000 && m_visible_height == 200 && decode_offset >= 0x100)
+				decode_offset -= 0x100;
+			trace_vram_write("row", use_9008_page ? "vram_9008_alias" : "vram", is_9000, offset, decode_offset, data, xbyte, idx, canon_y);
+			if (off < m_vram.size())
+				m_vram[off] = data;
+			if (m_color_mode)
+				color_latch_expand(off, data);
+			return;
+		}
+
+		u32 y = 0;
+		if (decode_mode_set_clear_alias(is_9000, offset, xbyte, y))
+		{
+			trace_clear_write(is_9000, offset, data, xbyte, y);
+			trace_clear_write(is_9000, offset, data, xbyte, 200u + y);
+			const u32 top_off = xbyte * VRAM_CANON_BYTES_PER_COL + y;
+			const u32 bottom_off = xbyte * VRAM_CANON_BYTES_PER_COL + 0x100u + y;
+			trace_vram_write("alias", "mode_set_alias", is_9000, offset, offset - 0x80, data, xbyte, y, y);
+			if (top_off < m_vram.size())
+				m_vram[top_off] = data;
+			if (bottom_off < m_vram.size())
+				m_vram[bottom_off] = data;
+			if (m_color_mode)
+			{
+				color_latch_expand(top_off, data);
+				color_latch_expand(bottom_off, data);
+			}
+			return;
+		}
+
+		trace_clear_reject(is_9000, offset, data);
+	}
+
+
+	// MMIO region (register space)
+	if (offset >= VRAM_MMIO_SPLIT)
+	{
+		if (offset == REG_D068_OFFSET && (data & 0x80) == 0)
+			trace_flush_clear("D068 clear bit dropped");
+		reg_write(offset, data);
+		if (offset == REG_D068_OFFSET || offset == REG_C060_OFFSET || offset == REG_C261_OFFSET)
+			update_geometry_from_profile();
+		return;
+	}
+
+	// Normal mode: canonical column-major bitmap region (0x0000..0x9FFF)
+	if (offset < VRAM_CANON_LIMIT)
+	{
+		if (m_color_mode)
+		{
+			const bool latch_9010 = is_9000 && offset >= 0x100;
+			const bool plane_8010 = !is_9000 && offset >= 0x100;
+			const offs_t decode_offset = (latch_9010 || plane_8010) ? (offset - 0x100) : offset;
+			u32 xbyte = 0, idx9 = 0;
+			if (!decode_col_major(decode_offset, xbyte, idx9))
+				return;
+
+			const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + idx9;
+			if (latch_9010)
+			{
+				trace_vram_write("col", "color_latch_9010", is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+				color_latch_expand(off, data);
+				return;
+			}
+
+			const u32 plane = plane_8010 ? 0 : (is_9000 ? 1 : 2);
+			trace_vram_write("col", plane == 0 ? "color_plane_8010" : (plane == 1 ? "color_plane_9000" : "color_plane_8000"),
+					is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+			if (off < m_color_plane[plane].size())
+				m_color_plane[plane][off] = data;
+			return;
+		}
+
+		const bool visible_9010_200 = is_9000 && m_visible_height == 200 && offset >= 0x100;
+		const offs_t decode_offset = visible_9010_200 ? (offset - 0x100) : offset;
+		u32 xbyte = 0, idx9 = 0;
+		if (!decode_col_major(decode_offset, xbyte, idx9))
+			return;
+
+		const u32 off = xbyte * VRAM_CANON_BYTES_PER_COL + idx9;
+		if (is_9000 && !visible_9010_200)
+		{
+			trace_vram_write("col", "hidden_9000", is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+			if (off < m_hidden_vram.size())
+				m_hidden_vram[off] = data;
+			return;
+		}
+		trace_vram_write("col", visible_9010_200 ? "vram_9010" : "vram", is_9000, offset, decode_offset, data, xbyte, idx9, idx9);
+		if (off < m_vram.size())
+			m_vram[off] = data;
+		return;
+	}
+
+	// Fallback: MMIO backing store
+	if (offset == REG_D068_OFFSET && (data & 0x80) == 0)
+		trace_flush_clear("D068 clear bit dropped");
+	reg_write(offset, data);
+	if (offset == REG_D068_OFFSET || offset == REG_C060_OFFSET || offset == REG_C261_OFFSET)
+		update_geometry_from_profile();
+		
+}
+
+// -------------------------------------------------
+// Rendering
+// -------------------------------------------------
 
 void gavdp_device::render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	const int width  = m_visible_width;   // 640
-	const int height = m_visible_height;  // 400
+	const int width  = m_visible_width;
+	const int height = m_visible_height;
 
 	if (m_visible_cols <= 0)
 		return;
 
-	u8  c663         = vram_byte(REG_C663_OFFSET);
-	int scroll_px    = int(c663);
-	const int total_lines = 400;
+	const u32 scroll_mod = (m_visible_height == 200) ? 200u : 400u;
+	const u32 scroll_base = (u32)effective_scroll_px() % scroll_mod;
 
 	for (int y = cliprect.min_y; y <= cliprect.max_y && y < height; ++y)
 	{
-		int scrolled_y = y + scroll_px;
-		while (scrolled_y >= total_lines)
-			scrolled_y -= total_lines;
+		const u32 canon_y = ((u32)y + scroll_base) % scroll_mod;
 
-		int scan_index;
-		if (scrolled_y < 200)
-			scan_index = scrolled_y;                 // 0x000..0x00C7
-		else
-			scan_index = 0x100 + (scrolled_y - 200); // 0x0100..0x01C7
+		// Canonical stacked mapping
+		const u32 scan_index = (canon_y < 200u) ? canon_y : (0x0100u + (canon_y - 200u));
 
 		for (int x = cliprect.min_x; x <= cliprect.max_x && x < width; ++x)
 		{
-			int col = x >> 3; // 0..79
+			const int col = x >> 3;
 			if (col < 0 || col >= m_visible_cols)
 			{
 				bitmap.pix(y, x) = rgb_t::black();
 				continue;
 			}
 
-			int bit = 7 - (x & 7);
+			const int bit = 7 - (x & 7);
+			const u32 col_base = (u32)col * VRAM_CANON_BYTES_PER_COL;
+			const u32 off = col_base + scan_index;
 
-			u32 col_base = col * VRAM_BYTES_PER_COL; // 0x200 per column
-			u32 offset   = col_base + scan_index;
+			const u8 b = (off < m_vram.size()) ? m_vram[off] : 0x00;
+			const bool on = ((b >> bit) & 1) != 0;
 
-			bool on = false;
-			if (offset < VRAM_PLANE_SIZE)
-			{
-				u8 b = vram_byte(offset);
-				on   = (b >> bit) & 0x01;
-			}
-
-			rgb_t color = on ? rgb_t(0xff, 0xff, 0xff) : rgb_t(0x00, 0x00, 0x00);
-			bitmap.pix(y, x) = color;
+			bitmap.pix(y, x) = on ? rgb_t(0x00, 0xff, 0x00) : rgb_t(0x00, 0x00, 0x00);
 		}
 	}
 }
 
-// ============================================================================
-//  Rendering – color (unchanged 640x200)
-// ============================================================================
-
 void gavdp_device::render_mode_color(bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
-	const int width  = m_visible_width;   // 640
-	const int height = m_visible_height;  // 200
+	const int width  = m_visible_width;
+	const int height = m_visible_height;
 
 	if (m_visible_cols <= 0)
 		return;
 
-	u8 attr = vram_byte(REG_D269_OFFSET) & 0x77;
-	u8 fg   = attr & 0x07;
-	u8 bg   = (attr >> 4) & 0x07;
-
-	u8  c663      = vram_byte(REG_C663_OFFSET);
-	int scroll_px = int(c663);
-	const int total_lines = 200;
+	const u32 scroll_base = (u32)effective_scroll_px() % 200u;
+	if (gavdp_trace_enabled())
+	{
+		static u32 last_color_scroll = 0xffffffff;
+		static u32 color_frame_count = 0;
+		if (last_color_scroll != scroll_base || color_frame_count < 8)
+		{
+			logerror("GAVDP COLOR frame=%u scroll_base=%u visible=%dx%d D068=%02x C060=%02x C261=%02x C663=%02x C462=%02x D269=%02x\n",
+					color_frame_count, scroll_base, width, height,
+					reg_read(REG_D068_OFFSET), reg_read(REG_C060_OFFSET), reg_read(REG_C261_OFFSET),
+					reg_read(REG_C663_OFFSET), reg_read(REG_C462_OFFSET), reg_read(REG_D269_OFFSET));
+			last_color_scroll = scroll_base;
+		}
+		color_frame_count++;
+	}
 
 	for (int y = cliprect.min_y; y <= cliprect.max_y && y < height; ++y)
 	{
-		int scrolled_y = y + scroll_px;
-		while (scrolled_y >= total_lines)
-			scrolled_y -= total_lines;
+		const u32 canon_y = ((u32)y + scroll_base) % 200u;
 
-		int scan_index = scrolled_y; // 0x000..0x00C7
+		const u32 scan_index = canon_y;
 
 		for (int x = cliprect.min_x; x <= cliprect.max_x && x < width; ++x)
 		{
-			int col = x >> 3;
+			const int col = x >> 3;
 			if (col < 0 || col >= m_visible_cols)
 			{
-				bitmap.pix(y, x) = m_palette[bg];
+				bitmap.pix(y, x) = rgb_t::black();
 				continue;
 			}
 
-			int bit = 7 - (x & 7);
+			const int bit = 7 - (x & 7);
+			const u32 col_base = (u32)col * VRAM_CANON_BYTES_PER_COL;
+			const u32 off = col_base + scan_index;
 
-			u32 col_base = col * VRAM_BYTES_PER_COL;
-			u32 offset   = col_base + scan_index;
-
-			bool on = false;
-			if (offset < VRAM_PLANE_SIZE)
+			u8 color = 0;
+			for (u32 plane = 0; plane < 3; plane++)
 			{
-				u8 b = vram_byte(offset);
-				on   = (b >> bit) & 0x01;
+				const u8 b = (off < m_color_plane[plane].size()) ? m_color_plane[plane][off] : 0x00;
+				if (BIT(b, bit))
+					color |= 1 << plane;
 			}
 
-			rgb_t color = on ? m_palette[fg] : m_palette[bg];
-			bitmap.pix(y, x) = color;
+			bitmap.pix(y, x) = m_palette[color & 0x07];
 		}
 	}
+}
+
+
+
+u32 gavdp_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
+{
+	if (reg_read(REG_D068_OFFSET) != m_d068_last)
+		update_geometry_from_profile();
+	if ((m_d068_last & 0x80) == 0)
+		trace_flush_clear("screen update normal mode");
+
+	if (m_color_mode)
+		render_mode_color(bitmap, cliprect);
+	else
+		render_mode_mono(bitmap, cliprect);
+
+	return 0;
 }

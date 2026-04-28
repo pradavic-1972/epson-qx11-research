@@ -1,178 +1,191 @@
 // license:BSD-3-Clause
 // Epson QX-11 GAVDP (Video Processor / Gate Array)
-
-#ifndef MAME_EPSON_GAVDP_H
-#define MAME_EPSON_GAVDP_H
+// Alias-window model:
+//
+//  - Driver installs TWO 0x10000 apertures:
+//        install_vram_window(space, 0x80000);
+//        install_vram_window(space, 0x90000);
+//
+//  - These are NOT two independent framebuffers in Mode 7.
+//    They are two *views* into the same canonical, column-centric VRAM layout:
+//
+//      Canonical per-column storage is 0x200 bytes (512) per column:
+//        idx 0x000..0x0C7 : top 200 scanlines
+//        idx 0x100..0x1C7 : bottom 200 scanlines
+//
+//    Conceptually:
+//      8000:yyyy addresses idx 0x000.. (top half) when yyyy is 0..199
+//      8000:0100-style column-major addresses provide the bottom half.
+//      In 400-line mono, 9000 column-major accesses are an offscreen
+//      scratch/page area used for save-under operations.  In 200-line mono,
+//      9010:0000 is the visible 200-line page base.
+//      In clear/scroll mode, 9000 remains the row-major bottom-half view for
+//      400-line mono; 9008-biased row-major writes address the same visible
+//      200-line page as 9010-biased column-major writes in 200-line mono.
+//
+//  - BIOS uses two bitmap addressing styles:
+//      * regular mode (D068 bit 7 clear): column-major bitmap writes
+//          offset = (xbyte<<9) | idx9
+//          one byte is 8 horizontal pixels; offset + 1 advances vertically.
+//      * clear/scroll mode (D068 bit 7 set): row-major bitmap writes
+//          offset = (y<<8) | xbyte
+//          one byte is 8 horizontal pixels; offset + 1 advances horizontally.
+//        The BIOS mode-set clear loop uses ES=9008, which reaches the 9000
+//        aperture with xbyte biased by +0x80.  That path is accepted only as
+//        a mode-set clear alias; regular clear/scroll writes remain xbyte 0..79.
+//
+//  - Clear/scroll mode does not make a single write represent an 8x16 text cell.
+//    Text rows are a BIOS/software convention; the GAVDP VRAM contract remains
+//    bitmap bytes plus a row-major address transform.
+//
 
 #pragma once
 
-#include "emupal.h"
 #include "screen.h"
-#include "device.h"
-
-// ============================================================================
-//  Device type
-// ============================================================================
-
-DECLARE_DEVICE_TYPE(EPSON_GAVDP, gavdp_device)
-
-// ============================================================================
-//  GAVDP device
-// ============================================================================
-//
-//  - Column-centric VRAM
-//  - Per-column layout (512 bytes):
-//        0x0000–0x00C7 : visible rows 0–199  (top half)
-//        0x00C8–0x00FF : gap (unused)
-//        0x0100–0x01C7 : visible rows 200–399 (bottom half, mono only)
-//        0x01C8–0x01FF : gap (unused)
-//  - Monochrome: 640×400 uses both halves
-//  - Color:      640×200 uses only 0x0000–0x00C7 (top half), bottom is 0
-//  - C663 is a vertical scroll index (pixels), applied as a simple ring:
-//        mono : (y + C663) % 400
-//        color: (y + C663) % 200
-//  - 8D068 (machine profile):
-//        0x02 → mono 640×400
-//        0x07 → color 640×200
-//        bit7 is used as a clear/scroll engine flag.
-//  - 8D269 (attribute) is used only in color mode as a global fg/bg color.
-//
+#include "emupal.h"
+#include <array>
+#include <vector>
 
 class gavdp_device :
 	public device_t,
 	public device_video_interface
 {
 public:
-	// --------------------------------------------------------------------
-	//  Construction
-	// --------------------------------------------------------------------
 	gavdp_device(const machine_config &mconfig, const char *tag, device_t *owner, u32 clock);
 
-	// Map GAVDP window into the main CPU address space at `base`.
-	// This installs a full 64 KiB segment (0x0000–0xFFFF) backed by m_vram.
+	// Install a 0x10000 window. The base selects which alias view is used (0x80000 vs 0x90000).
 	void install_vram_window(address_space &space, u32 base);
 
-	// Raw VRAM access (for debugging / logs)
-	u8  vram_r(offs_t offset);
-	void vram_w(offs_t offset, u8 data);
+	// If your machine config's screen isn't tagged "screen", override it (e.g. "^screen").
+	void set_screen_tag(const char *tag);
 
-	// Screen update callback
 	u32 screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect);
 
 protected:
-	// device_t
 	virtual void device_start() override;
 	virtual void device_reset() override;
-	virtual void device_add_mconfig(machine_config &config) override;
 
 private:
-	// --------------------------------------------------------------------
-	//  Internal constants / layout
-	// --------------------------------------------------------------------
+	// -------------------------------------------------
+	// Layout
+	// -------------------------------------------------
+	static constexpr int  VRAM_COLS               = 80;     // 640/8
+	static constexpr int  VRAM_BYTES_PER_COL      = 0x200;  // canonical stacked layout per column
+	static constexpr u32  VRAM_WINDOW_SIZE        = 0x10000;
+	static constexpr u32  VRAM_CANON_BYTES_PER_COL = 0x200; // canonical col stride
+	static constexpr u32  VRAM_CANON_SIZE = VRAM_COLS * VRAM_CANON_BYTES_PER_COL; // 0xA000
+	static constexpr offs_t VRAM_CANON_LIMIT = VRAM_CANON_SIZE;
 
-	// Bitmap plane: 80 columns × 0x200 bytes = 0xA000, but we leave some headroom.
-	static constexpr int VRAM_COLS           = 80;
-	static constexpr int VRAM_BYTES_PER_COL  = 0x200;
-	static constexpr int VRAM_PLANE_SIZE     = VRAM_COLS * VRAM_BYTES_PER_COL; // 0xA000
+	// Normal VRAM occupies 0x0000..0x9fff; clear/scroll row-major access is
+	// decoded before the MMIO split so scanlines 192..199 remain reachable.
+	static constexpr offs_t VRAM_MMIO_SPLIT       = 0x0C000;
 
-	// CPU-visible GAVDP window: full 64 KiB segment (0x0000–0xFFFF)
-	static constexpr int VRAM_WINDOW_SIZE    = 0x10000;
+	// MMIO offsets (within aperture)
+	static constexpr offs_t REG_C060_OFFSET = 0x0C060;
+	static constexpr offs_t REG_C261_OFFSET = 0x0C261;
+	static constexpr offs_t REG_C462_OFFSET = 0x0C462;
+	static constexpr offs_t REG_C663_OFFSET = 0x0C663;
+	static constexpr offs_t REG_D068_OFFSET = 0x0D068;
+	static constexpr offs_t REG_D269_OFFSET = 0x0D269;
 
-	// GAVDP "register" mirrors in VRAM
-	static constexpr offs_t REG_C060_OFFSET  = 0x0C060;
-	static constexpr offs_t REG_C261_OFFSET  = 0x0C261;
-	static constexpr offs_t REG_C462_OFFSET  = 0x0C462;
-	static constexpr offs_t REG_C663_OFFSET  = 0x0C663;
-	static constexpr offs_t REG_D068_OFFSET  = 0x0D068;
-	static constexpr offs_t REG_D269_OFFSET  = 0x0D269;
-	static constexpr offs_t REG_D46A_OFFSET  = 0x0D46A;
-	static constexpr offs_t REG_C864_OFFSET  = 0x0C864;
-	static constexpr offs_t REG_CA65_OFFSET  = 0x0CA65;
-	static constexpr offs_t REG_CC66_OFFSET  = 0x0CC66;
-	static constexpr offs_t REG_CE67_OFFSET  = 0x0CE67;
+	// -------------------------------------------------
+	// Window handlers
+	// -------------------------------------------------
+	u8  win_r_8000(offs_t offset);
+	void win_w_8000(offs_t offset, u8 data);
 
-	// --------------------------------------------------------------------
-	//  Subdevices
-	// --------------------------------------------------------------------
+	u8  win_r_9000(offs_t offset);
+	void win_w_9000(offs_t offset, u8 data);
 
-	// The GAVDP owns its own screen.
-	required_device<screen_device> m_screen;
+	u8  win_r(bool is_9000, offs_t offset);
+	void win_w(bool is_9000, offs_t offset, u8 data);
 
-	// --------------------------------------------------------------------
-	//  VRAM and mapping
-	// --------------------------------------------------------------------
+	inline bool color_attr_index_from_off(u32 off, u32 &idx) const;
+	
+	// -------------------------------------------------
+	// Decode helpers
+	// -------------------------------------------------
+	// Column-major: offset = (xbyte<<9) | idx9  where idx9 can be 0..0x1C7
+	bool decode_col_major(offs_t offset, u32 &xbyte, u32 &idx9) const;
 
-	// Full 64 KiB GAVDP window as seen by the CPU (0x0000–0xFFFF).
-	// Bitmap data lives in [0x0000..0xBFFF]. The rest (0xC000–0xFFFF)
-	// is used by BIOS as control/mirror area (e.g., 0xD068, 0xD269).
-	std::vector<u8> m_vram;
+	// Row-major: offset = (y<<8) | xbyte, y is 0..199; segment selects half.
+	bool decode_row_major(bool is_9000, offs_t offset, u32 &xbyte, u32 &canon_y) const;
 
-	// Base address where the window is installed in the CPU program space.
-	u32             m_vram_base = 0;
-	address_space  *m_cpu_space = nullptr;
+	// Mode-set clear alias: ES=9008 appears as 9000:(y<<8)|(0x80+x).
+	bool decode_mode_set_clear_alias(bool is_9000, offs_t offset, u32 &xbyte, u32 &y) const;
 
-	// --------------------------------------------------------------------
-	//  Video state mirrors
-	// --------------------------------------------------------------------
-
-	bool m_color_mode        = false; // false: mono 640×400, true: color 640×200
-	bool m_scroll_mode       = false; // true: this clear pass is a scroll (C663 written)
-	bool m_clear_scroll_mode = false; // true: D068 bit7 is set (clear/scroll engine active)
-	bool m_app_clear         = false; // (unused right now, reserved)
-
-	int  m_visible_height    = 400;   // scanlines visible: 400 or 200
-	int  m_visible_cols      = 80;    // always 80 logical character columns
-	int  m_visible_width     = 640;   // m_visible_cols * 8
-
-	int  m_d068_last         = 0;     // last value written to D068 (profile/engine)
-
-	// Erase tracking (while D068 bit7 is set)
-	bool m_erase_tracking    = false;
-	u32  m_erase_min         = 0;     // smallest offset zeroed (unused in current heuristic)
-	u32  m_erase_max         = 0;     // largest offset zeroed (unused)
-	u32  m_erase_count       = 0;     // how many zero writes this pass
-	u8   m_erase_min_low     = 0xff;  // min (offset & 0xFF) (unused)
-	u8   m_erase_max_low     = 0x00;  // max (offset & 0xFF) (unused)
-
-	// Scroll clear logging: per-column band info
-	u8   m_col_used[VRAM_COLS];       // 1 if this column saw any zero writes in this pass
-	u16  m_col_min_idx[VRAM_COLS];    // min idx (0..0x1FF) zeroed in this col
-	u16  m_col_max_idx[VRAM_COLS];    // max idx (0..0x1FF) zeroed in this col
-
-	// Snapshots of scroll-related regs for logging
-	u8   m_reg_c663 = 0;              // last written C663
-	u8   m_reg_c462 = 0;              // last written C462
-
-	// 8-color RGB palette for color mode
-	rgb_t m_palette[8];
-
-	// --------------------------------------------------------------------
-	//  Helpers
-	// --------------------------------------------------------------------
-
-	void init_palette();
-
-	// Read machine profile (D068) and decide:
-	//  - mono vs color
-	//  - 640×400 vs 640×200
+	// -------------------------------------------------
+	// MMIO helpers
+	// -------------------------------------------------
+	inline u8  reg_read(offs_t off) const;
+	inline void reg_write(offs_t off, u8 data);
 	void update_geometry_from_profile();
 
-	// Address helpers
-	inline u8  vram_byte(u32 offset) const;
-	inline u8 &vram_byte_ref(u32 offset);
-
-	// Core rendering entry
-	void render_framebuffer(bitmap_rgb32 &bitmap, const rectangle &cliprect);
-
-	// Mode-specific rendering
+	// -------------------------------------------------
+	// Rendering
+	// -------------------------------------------------
 	void render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void render_mode_color(bitmap_rgb32 &bitmap, const rectangle &cliprect);
+	int  effective_scroll_px() const;
+	void trace_clear_write(bool is_9000, offs_t offset, u8 data, u32 xbyte, u32 canon_y);
+	void trace_clear_reject(bool is_9000, offs_t offset, u8 data);
+	void trace_flush_clear(const char *reason);
+	void trace_vram_write(const char *mode, const char *target, bool is_9000, offs_t offset, offs_t decode_offset, u8 data, u32 xbyte, u32 y_or_idx, u32 canon_y);
+	void trace_vram_read(const char *mode, const char *target, bool is_9000, offs_t offset, offs_t decode_offset, u8 data, u32 xbyte, u32 y_or_idx, u32 canon_y);
 
-	// CLS helper
-	void clear_text_vram();
-	void clear_scroll_bottom_band_for_columns();
-	void clear_window_from_ga();      
+private:
+	required_device<screen_device> m_screen;
 
+	// Canonical stacked VRAM (mode 7): 80 cols * 0x200 bytes/col
+	std::vector<u8> m_vram;
+
+	// Normal-mode 9000 scratch page: preserves save-under accesses without
+	// rendering them as visible bottom VRAM.
+	std::vector<u8> m_hidden_vram;
+
+	// Color mode has three 1bpp output planes.  BIOS text writes target
+	// 9010:xxxx as a latch-expanded glyph stream, while direct plane helpers
+	// use the 8010/9000/8000 segment trio.
+	std::array<std::vector<u8>, 3> m_color_plane;
+
+	// Backing for full 0x10000 aperture (registers/unused); shared across both windows
+	std::vector<u8> m_mmio;
+
+	std::array<u8,2000> m_color_attr;
+
+	// Cached mode/geometry
+	bool m_color_mode      = false;
+	int  m_visible_height  = 400;
+	int  m_visible_cols    = 80;
+	int  m_visible_width   = 640;
+
+	// Cached regs
+	u8 m_d068_last = 0x00;
+	u8 m_reg_c663  = 0x00;
+	u8 m_reg_c462  = 0x00;
+	u8 m_reg_c261  = 0x00;
+
+	rgb_t m_palette[8];
+
+	bool m_trace_clear_active = false;
+	u64 m_trace_clear_count = 0;
+	u64 m_trace_clear_reject_count = 0;
+	u64 m_trace_clear_zero_count = 0;
+	u64 m_trace_clear_ff_count = 0;
+	u32 m_trace_clear_min_x = 0;
+	u32 m_trace_clear_max_x = 0;
+	u32 m_trace_clear_min_y = 0;
+	u32 m_trace_clear_max_y = 0;
+	u32 m_trace_clear_min_off = 0;
+	u32 m_trace_clear_max_off = 0;
+	u32 m_trace_clear_windows = 0;
+	u32 m_trace_clear_reject_min_off = 0;
+	u32 m_trace_clear_reject_max_off = 0;
+	u32 m_trace_clear_reject_samples = 0;
+	u32 m_trace_vram_write_count = 0;
+	u32 m_trace_vram_last_segment = 0xffffffff;
+	u32 m_trace_vram_read_count = 0;
+	u32 m_trace_vram_last_read_segment = 0xffffffff;
 };
 
-#endif // MAME_EPSON_GAVDP_H
+DECLARE_DEVICE_TYPE(EPSON_GAVDP, gavdp_device)

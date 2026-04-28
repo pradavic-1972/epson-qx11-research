@@ -43,11 +43,12 @@ void epson_gavnit_device::device_start()
 
     save_item(NAME(m_fdc_intrq));
 
-    // default vectors: 0 = timer INT71h, 1 = keyboard INT75h
+    // default vectors: 0 = timer INT71h, 1 = keyboard INT75h, 10 = RTC INT7Ah
     m_vector[0] = 0x71;
     m_vector[1] = 0x75;
-    for (int i = 2; i < 8; ++i)
+    for (int i = 2; i < 16; ++i)
         m_vector[i] = 0x70 + i;    // placeholders for now
+    m_vector[10] = 0x7a;
 
     // default mask: everything enabled
     m_mask_lo = 0xFF;
@@ -122,7 +123,7 @@ void epson_gavnit_device::schedule_next_event()
 void epson_gavnit_device::timer_fired()
 {
     // Line 0 is the periodic timer (INT 71h).
-    m_irr |= 0x01;
+    m_irr |= 0x0001;
     update_intr_line();
 
     // Move compare forward so the BIOS sees the current deadline
@@ -148,9 +149,9 @@ void epson_gavnit_device::update_intr_line()
 
 int epson_gavnit_device::highest_pending() const
 {
-    u8 cand = (m_irr & ~m_imr);
-    for (int i = 0; i < 8; ++i)
-        if (cand & (1 << i))
+    u16 cand = (m_irr & ~m_imr);
+    for (int i = 0; i < 16; ++i)
+        if (cand & (u16(1) << i))
             return i;
     return -1;
 }
@@ -164,11 +165,11 @@ int epson_gavnit_device::inta_cb(int)
         return 0xFF;
     }
 
-    m_irr &= ~(1 << line);
-    m_isr |=  (1 << line);
+    m_irr &= ~(u16(1) << line);
+    m_isr |=  (u16(1) << line);
     update_intr_line();
 
-    logerror("GAVNIT: INTA line=%d vector=%02X IRR=%02X ISR=%02X IMR=%02X\n",
+    logerror("GAVNIT: INTA line=%d vector=%02X IRR=%04X ISR=%04X IMR=%04X\n",
              line, m_vector[line], m_irr, m_isr, m_imr);
 
     return m_vector[line];
@@ -176,13 +177,13 @@ int epson_gavnit_device::inta_cb(int)
 
 void epson_gavnit_device::irq_request(int line, bool state)
 {
-    if (line < 0 || line > 7)
+    if (line < 0 || line > 15)
         return;
 
     if (state)
-        m_irr |=  (1 << line);
+        m_irr |=  (u16(1) << line);
     else
-        m_irr &= ~(1 << line);
+        m_irr &= ~(u16(1) << line);
 
     update_intr_line();
 }
@@ -191,13 +192,13 @@ void epson_gavnit_device::irq_request(int line, bool state)
 void epson_gavnit_device::keyboard_irq_w(int state)
 {
     const bool level = state != 0;
-    logerror("GAVNIT: keyboard_irq_w level=%d last=%d IRR=%02X IMR=%02X\n",
+    logerror("GAVNIT: keyboard_irq_w level=%d last=%d IRR=%04X IMR=%04X\n",
              level, m_kb_last_level, m_irr, m_imr);
 
     if (level && !m_kb_last_level)
     {
         irq_request(1, true);
-        logerror("GAVNIT: keyboard IRQ edge → IRR=%02X\n", m_irr);
+        logerror("GAVNIT: keyboard IRQ edge -> IRR=%04X\n", m_irr);
     }
 
     m_kb_last_level = level;
@@ -205,7 +206,7 @@ void epson_gavnit_device::keyboard_irq_w(int state)
 
 void epson_gavnit_device::set_line_vector(int line, u8 vector)
 {
-    if (line < 0 || line > 7)
+    if (line < 0 || line > 15)
         return;
     m_vector[line] = vector;
 }
@@ -267,17 +268,18 @@ void epson_gavnit_device::intmask_lo_w(u8 data)
     // BIOS writes AX to port 4. Low byte is "enable bits".
     // 1 = enabled, 0 = masked. Internally: IMR = ~enable_lo.
     m_mask_lo = data;
-    m_imr     = ~data;
+    m_imr     = (m_imr & 0xff00) | u16(~data & 0x00ff);
 
-    logerror("GAVNIT: intmask_lo_w data=%02X -> IMR=%02X\n", data, m_imr);
+    logerror("GAVNIT: intmask_lo_w data=%02X -> IMR=%04X\n", data, m_imr);
     update_intr_line();
 }
 
 void epson_gavnit_device::intmask_hi_w(u8 data)
 {
-    // High byte is latched for completeness; currently unused
     m_mask_hi = data;
-    logerror("GAVNIT: intmask_hi_w data=%02X\n", data);
+    m_imr     = (m_imr & 0x00ff) | (u16(~data & 0x00ff) << 8);
+    logerror("GAVNIT: intmask_hi_w data=%02X -> IMR=%04X\n", data, m_imr);
+    update_intr_line();
 }
 
 // FDC Interrupt /// 
@@ -289,6 +291,11 @@ void epson_gavnit_device::fdc_intrq_w(int state)
 
     // If GAVNIT ORs sources to generate INT 71, you might do:
     // recompute_interrupts();
+}
+
+void epson_gavnit_device::rtc_irq_w(int state)
+{
+    irq_request(10, state != 0);
 }
 
 //-------------------------------------------------

@@ -55,6 +55,9 @@ void epson_gavnio_device::device_start()
     save_item(NAME(m_tx_bits_remaining));
     save_item(NAME(m_tx_parity_acc));
     save_item(NAME(m_tx_active));
+
+    // Joystick control state
+    save_item(NAME(m_joy1_enabled));
 }
 
 void epson_gavnio_device::device_reset()
@@ -125,10 +128,25 @@ void epson_gavnio_device::handle_tx_bit()
     switch (m_tx_state)
     {
     case tx_state::START:
+    {
         // We already drove the start bit low in start_tx_frame().
-        // Just move to DATA on the first sampling edge.
-        m_tx_state = tx_state::DATA;
+        // On the very first post-start clock edge we must immediately drive
+        // data bit 0, otherwise the start bit lasts one bit-cell too long and
+        // every transmitted command arrives shifted left by one.
+        int bit = m_tx_shift & 1;
+        m_tx_shift >>= 1;
+
+        if (bit)
+            m_tx_parity_acc ^= 1;
+
+        m_kbd_rxd(bit ? 1 : 0);
+
+        if (--m_tx_bits_remaining == 0)
+            m_tx_state = tx_state::PARITY;
+        else
+            m_tx_state = tx_state::DATA;
         break;
+    }
 
     case tx_state::DATA:
     {
@@ -298,6 +316,7 @@ void epson_gavnio_device::recompute_status()
 {
     // Live bits (non-sticky) recomputed on every change.
     u8 stat = 0;
+    
 
     // TX ready reflects whether we’re in the middle of a host→kbd frame.
     if (!m_tx_active)
@@ -377,12 +396,16 @@ u8 epson_gavnio_device::data_r()
      case 0x09:
         return 0x0B;
         break;
+
+     case 0x85:
+        return 0x6C;
+        break;
     
     default:
         return data;
         break;
     }
-    //return data;
+    return data;
 }
 
 void epson_gavnio_device::data_w(u8 data)
@@ -458,7 +481,7 @@ void epson_gavnio_device::status_w(u8 data)
 }
 
 //-------------------------------------------------
-//  Floppy ports (0x0E/0x0F) – forwarded to GAFDDC
+//  Floppy ports (0x0E/0x0F) – forwarded to GAFDDC and Joystick ports
 //-------------------------------------------------
 
 u8 epson_gavnio_device::floppy_status_r()
@@ -469,13 +492,27 @@ u8 epson_gavnio_device::floppy_status_r()
         result = m_gafddc->status_r();
 
     //logerror("GAVNIO: floppy_status_r -> %02X\n", result);
-    return result;
+    if (m_joy1_enabled)
+        return result | 11010000;
+    else 
+        return result;
 }
 
 void epson_gavnio_device::floppy_control_w(u8 data)
 {
     if (!machine().side_effects_disabled())
         logerror("GAVNIO: floppy_control_w <- %02X\n", data);
+
+    if (data == 0x00) {
+        
+        logerror("GAVNIO: Joystick control write: %02X\n", data);
+        m_joy1_enabled = false;
+    }
+
+    if (data & 0x20) {
+        logerror("GAVNIO: Joystick control write: %02X\n", data);
+        m_joy1_enabled = false;
+    }
 
     if (m_gafddc)
         m_gafddc->control_w(data);
