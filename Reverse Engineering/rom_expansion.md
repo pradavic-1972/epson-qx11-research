@@ -117,11 +117,6 @@ Additional reverse engineering should focus on:
 
 <img width="2252" height="4000" alt="20260520_192505" src="https://github.com/user-attachments/assets/23100a06-9a0c-4e27-8e99-ecf57d1ac6b8" />
 
-
-### Expanded ROMI Device
-
-*Insert photograph showing the 64 KB ROMI EPROM installed in the system.*
-
 ### Modified ROM Image
 
 [You can download the extended ROM from the roms section of this github](../roms/ROMI.bin) 
