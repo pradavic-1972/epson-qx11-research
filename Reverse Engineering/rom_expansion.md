@@ -115,7 +115,8 @@ Additional reverse engineering should focus on:
 
 ### ROM Configuration Jumpers
 
-*Insert photograph showing the three ROM configuration jumpers.*
+<img width="2252" height="4000" alt="20260520_192505" src="https://github.com/user-attachments/assets/23100a06-9a0c-4e27-8e99-ecf57d1ac6b8" />
+
 
 ### Expanded ROMI Device
 
