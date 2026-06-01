@@ -124,4 +124,4 @@ Additional reverse engineering should focus on:
 
 ### Modified ROM Image
 
-*Insert screenshot or binary layout of the expanded ROM image containing FORMAT.COM, MODE.COM and FILINK.*
+[You can download the extended ROM from the roms section of this github](../roms/ROMI.bin) 
