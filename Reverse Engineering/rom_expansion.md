@@ -48,7 +48,7 @@ This jumper allows expansion of ROMI beyond the standard configuration.
 
 The discovery of Jumper 3 made it possible to replace the original 32 KB ROMI device with a 64 KB EPROM.
 
-By configuring the motherboard for a 64 KB ROMI and installing a larger EPROM, additional software could be stored in ROM while preserving normal system operation.
+By configuring the motherboard for a 64 KB ROMI and installing a larger EPROM (an AT27C512R), additional software could be stored in ROM while preserving normal system operation.
 
 The original ROMI image already contains COMMAND.COM. The expanded ROM image retains the original ROM contents and adds several useful DOS utilities that would otherwise require a floppy disk.
 
