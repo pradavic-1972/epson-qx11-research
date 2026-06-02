@@ -67,6 +67,8 @@ As a result, the system now provides:
 
 This significantly improves the usability of a restored QX-11, especially when no original system disks are available.
 
+[You can get the details about how the ROM filesystem works in the QX-11 here](Cartridge.md#8-rom-filesystem-layout)
+
 ## Practical Benefits
 
 A machine equipped with the expanded ROM can:
