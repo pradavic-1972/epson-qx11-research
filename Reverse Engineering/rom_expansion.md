@@ -23,8 +23,8 @@ This jumper controls the expected size of the BIOS ROM (ROMID).
 
 | Setting | ROMID Size |
 |----------|----------|
-| Position A | 16 KB |
-| Position B | 32 KB |
+| Position A | 32 KB |
+| Position B | 16 KB |
 
 ### J1 – ROMI Size Selection (32 KB / 16 KB)
 
@@ -32,8 +32,8 @@ This jumper controls one aspect of the DOS ROM configuration.
 
 | Setting | ROMI Size |
 |----------|----------|
-| Position A | 16 KB |
-| Position B | 32 KB |
+| Position A | 32 KB |
+| Position B | 16 KB |
 
 ### J3 – ROMI Size Selection (32 KB / 64 KB)
 
@@ -41,8 +41,8 @@ This jumper allows expansion of ROMI beyond the standard configuration.
 
 | Setting | ROMI Size |
 |----------|----------|
-| Position A | 32 KB |
-| Position B | 64 KB |
+| Position A | 64 KB |
+| Position B | 32 KB |
 
 ## ROMI Expansion Experiment
 
