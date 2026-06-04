@@ -18,26 +18,11 @@ This archive aims to:
 
 ---
 
-## 📁 Repository Structure
-
-```plaintext
-epson-qx11-research/
-├── README.md               # This file
-├── /photos/                # High-resolution photos of boards and internals
-├── /roms/                  # System ROM and cartridge ROM dumps (BIN format)
-├── /schematics/            # PDF and KiCad files for subsystems
-├── /experiments/           # RAM expansions, Pico-based video card, PSU mods
-├── /disassembly/           # Disassembled ROM code and memory maps
-├── LICENSE                 # MIT License (for code/hardware files)
-└── LICENSE-CC-BY.txt       # Creative Commons License (for media & docs)
-```
-
----
-
 ## 🛠️ Current Highlights
 
 ### ✅ ROM Dumps
-- `system_rom_high.bin` and `system_rom_low.bin` – Original QX-11 MS-DOS 2.11 ROM
+- Original 32KB QX-11 [BIOS](roms/EPSON_ABACUS_M25141CA.BIN) and [MS-DOS 2.11](roms/EPSON_ABACUS_M25140CA.BIN) ROM
+- Expanded 64KB MSDOS [ROM](roms/ROMI.bin)
 
 ### ✅ Reverse Engineering
 - Analyze the function of the QX-11 [Gate-Arrays](Reverse%20Engineering/gate-arrays.md)
@@ -47,7 +32,7 @@ epson-qx11-research/
 - [ROM Size selection and expanded 64KB ROM](Reverse%20Engineering/rom_expasion.md) 
 
 ### ✅ Experiments
-- **Boot another OS ([ELKS](Reverse%20Engineering/boot_elks_on_qx11.md),FreeDOS)** Use the cartridge interface or a bootable floppy disk to boot another O.S.
+- **Boot [ELKS](Reverse%20Engineering/boot_elks_on_qx11.md)**
 - **RAM Expansion** up to 1MB using Raspberry Pi Pico
 - **PSU Replacement** using modern switching supplies
 - **Custom VGA Output** interfaced via GPIO (Pico-based)
@@ -57,7 +42,7 @@ epson-qx11-research/
 ## 📷 Gallery
 
 See `/photos/` for high-res images of:
-- QX-11 motherboard (front and back)
+- [QX-11 motherboard](photos/motherboard/README.md)
 - GAFDDC chip and FDC region
 - Power supply area with TL494s
 - Expansion slots and video port
@@ -67,7 +52,7 @@ See `/photos/` for high-res images of:
 ## 📚 Related Systems
 
 This work relates to:
-- Epson QX-10 and QX-16
+- Epson QX-10 and [QX-16](https://github.com/pradavic-1972/epson-qx16-research)
 - NEC µPD765 floppy controllers
 - Early MS-DOS machines with cartridge support
 
