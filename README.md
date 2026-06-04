@@ -40,7 +40,7 @@ epson-qx11-research/
 - `system_rom_high.bin` and `system_rom_low.bin` – Original QX-11 MS-DOS 2.11 ROM
 
 ### ✅ Reverse Engineering
-- GAFDDC to uPD765 FDC signal mapping
+- Analyze the function of the QX-11 [Gate-Arrays](Reverse%20Engineering/gate-arrays.md)
 - Making a disk [bootable](Reverse%20Engineering/qx11_floppy_boot.md) on the QX-11
 - Address decoding for ROM [cartridge](Reverse%20Engineering/Cartridge.md) slot
 - How the QX-11 communicates with the [EPSON HD-10](Reverse%20Engineering/Hard%20Drive%20access%20EPSON%20HD-10.md) external hard drive.
