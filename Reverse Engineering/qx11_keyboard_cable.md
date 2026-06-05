@@ -4,7 +4,7 @@ The Epson QX-11 uses an **8-pin mini-DIN** connector for the keyboard. This is d
 
 Electrically, the QX-11 keyboard interface appears to use the **same signal assignments on the same pin numbers** as the QX-10/QX-16 keyboard connection. Because of that, I was able to build a **DIN-8 to mini-DIN-8 adapter cable** and use an Epson QX-16 keyboard with the QX-11.
 
-The keyboard I tested is the [**Epson Q603A**](photos/20250823_130528.jpg) keyboard, which is the same keyboard model used with the QX-11 and QX-16. The QX-11 could also use the compact [**Epson Q604A**](https://github.com/GigaBajcior/Epson_Q601A_aka_QX-11_aka_QC-11/blob/main/Photos/Keyboard/01.%20Keyboard.jpg) keyboard. The Japanese version of the system also had two Japanese JIS-layout keyboard options: a compact keyboard and an extended keyboard.
+The keyboard I tested is the [**Epson Q603A**](/photos/20250823_130528.jpg) keyboard, which is the same keyboard model used with the QX-11 and QX-16. The QX-11 could also use the compact [**Epson Q604A**](https://github.com/GigaBajcior/Epson_Q601A_aka_QX-11_aka_QC-11/blob/main/Photos/Keyboard/01.%20Keyboard.jpg) keyboard. The Japanese version of the system also had two Japanese JIS-layout keyboard options: a compact keyboard and an extended keyboard.
 
 ## QX-11 Keyboard Pinout
 
