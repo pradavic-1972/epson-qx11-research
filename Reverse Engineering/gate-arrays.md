@@ -16,7 +16,7 @@ This file documents everything known so far, including interaction diagrams, VRA
 4. [GAVNIT](gavnit.md) – Interrupt & Host Timer Gate Array  
 5. GAFDDC – Floppy Drive Control Gate Array  
 6. [GAVDP](gavdp.md) – Video Display Processor Gate Array  
-7. GAVNMR – Memory Refresh Gate Array (Unknown GA)  
+7. [GAVEMR](gavemr.md) – RAM/ROM Memory control  
 8. Complete System Interaction Diagram  
 9. Summary  
 
