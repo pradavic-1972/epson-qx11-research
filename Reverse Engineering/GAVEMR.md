@@ -1,8 +1,12 @@
-# Epson QX-11 GAVEMR Gate Array Documentation
+# Epson QX-11 GAVEMR Gate Array and DRAM Configuration Research
 
 ## Overview
 
-The **GAVEMR** is one of the main custom gate arrays used in the Epson QX-11 / QC-11 computer system. Based on hardware tracing, reverse engineering, and real hardware behavior, the GAVEMR appears to be responsible for:
+The Epson QX-11 / QC-11 uses several custom Epson gate arrays to implement functions normally handled by multiple standard support chips in contemporary IBM PC systems.
+
+One of the most important of these devices is the **GAVEMR** memory gate array.
+
+Based on hardware tracing, reverse engineering, oscilloscope analysis, and real hardware experiments, the GAVEMR appears to be responsible for:
 
 * DRAM control
 * DRAM refresh generation
@@ -12,7 +16,7 @@ The **GAVEMR** is one of the main custom gate arrays used in the Epson QX-11 / Q
 * Wait-state generation
 * Memory configuration
 
-The GAVEMR is likely equivalent in function to the **GAPNMD** gate array used in the Epson PX-4.
+The GAVEMR is likely functionally related to the **GAPNMD** gate array used in the Epson PX-4 portable computer.
 
 ---
 
@@ -46,13 +50,17 @@ The GAVEMR directly monitors the 8088 CPU address bus.
 | A19/S6      | 71         |
 | ALE         | 57         |
 
-This confirms the GAVEMR participates directly in memory decoding and timing.
+This confirms the GAVEMR participates directly in:
+
+* memory decoding
+* memory timing
+* system memory arbitration
 
 ---
 
 # Data Bus Connections
 
-The GAVEMR is also connected to the CPU data bus.
+The GAVEMR is also connected directly to the CPU data bus.
 
 | GAVEMR Pin | Function |
 | ---------- | -------- |
@@ -72,13 +80,13 @@ The GAVEMR generates the DRAM timing signals.
 
 Additional traced connections:
 
-| GAVEMR Pin | DRAM Pin     |
-| ---------- | ------------ |
-| 21         | DRAM address |
-| 22         | DRAM address |
-| 23         | DRAM address |
+| GAVEMR Pin | DRAM Function |
+| ---------- | ------------- |
+| 21         | DRAM address  |
+| 22         | DRAM address  |
+| 23         | DRAM address  |
 
-This confirms the GAVEMR performs multiplexed DRAM addressing.
+This confirms the GAVEMR performs multiplexed DRAM addressing internally.
 
 ---
 
@@ -86,7 +94,7 @@ This confirms the GAVEMR performs multiplexed DRAM addressing.
 
 The system crystal oscillator feeds directly into the GAVEMR.
 
-```text
+```text id="y7swyo"
 14.7456 MHz Crystal
         ↓
 TC40H004 Oscillator/Inverter
@@ -94,13 +102,13 @@ TC40H004 Oscillator/Inverter
 GAVEMR Pin 35
 ```
 
-The GAVEMR likely derives internal memory timing from this master clock.
+The GAVEMR likely derives all DRAM timing and refresh timing from this master clock source.
 
 ---
 
 # ROM Control
 
-The GAVEMR directly controls ROM chip selection.
+The GAVEMR directly controls ROM selection.
 
 | GAVEMR Pin | Destination |
 | ---------- | ----------- |
@@ -112,13 +120,13 @@ Additional observation:
 
 * ROMID /OE is permanently tied to GND.
 
-This indicates the GAVEMR performs the ROM address decoding internally.
+This confirms the GAVEMR performs the ROM address decoding internally.
 
 ---
 
 # ROM Configuration Jumpers
 
-Three jumpers near the GAVEMR configure ROM size support.
+Three jumpers located near the GAVEMR configure [ROM size support](rom_expansion.md).
 
 | Jumper | Function        |
 | ------ | --------------- |
@@ -126,139 +134,279 @@ Three jumpers near the GAVEMR configure ROM size support.
 | J2     | ROMI 16K / 32K  |
 | J3     | ROMI 32K / 64K  |
 
-The jumpers reroute ROM address lines, allowing multiple [ROM sizes](rom_expansion.md) to be installed.
+These jumpers reroute ROM address lines and allow the motherboard to support multiple ROM sizes.
 
 ---
 
-# DRAM Configuration
+# DRAM Configuration Jumpers
 
-The QX-11 motherboard supports multiple DRAM configurations.
+A second set of jumpers near the GAVEMR appears to configure the installed DRAM type [PICTURE](photos/DRAM_TYPE.jpg).
 
-Observed behavior:
+This discovery was made during testing of a QX-11 system populated with:
 
-* 512 KB installed RAM
-* Jumper Position A → system reports 128 KB
-* Jumper Position B → system reports 512 KB
+```text id="ez1g8z"
+16 × 50256 / 41256-class DRAM chips
+```
 
-Installed DRAMs:
+The installed memory capacity was physically:
 
-* 16 × 50256 / 4256-class DRAM chips
+```text id="95ey4j"
+512 KB
+```
 
-This suggests the GAVEMR supports multiple DRAM organization modes.
+---
+
+# Observed Behavior
+
+Two jumper configurations were tested.
+
+## Position A
+
+When the jumper was placed in Position A:
+
+```text id="9j6kuy"
+System reports 128 KB RAM
+```
+
+---
+
+## Position B
+
+When the jumper was placed in Position B:
+
+```text id="s4mjlwm"
+System reports 512 KB RAM
+```
+
+No DRAM chips were changed during testing.
+
+Only the jumper position was modified.
+
+This strongly indicates the jumper changes the memory controller configuration inside the GAVEMR itself.
+
+---
+
+# Installed DRAM Type
+
+The installed DRAMs are compatible with:
+
+| DRAM Family | Organization |
+| ----------- | ------------ |
+| 41256       | 256K × 1     |
+| HM50256     | 256K × 1     |
+| TMS4256     | 256K × 1     |
+
+Total memory calculation:
+
+```text id="6wluq5"
+16 × 256K bits
+= 4096K bits
+= 512 KB
+```
+
+which matches the detected RAM in Position B.
+
+---
+
+# Probable DRAM Support Modes
+
+The observed behavior strongly suggests the motherboard was designed to support two different DRAM generations.
+
+| Jumper Position | DRAM Type | Total RAM |
+|---|---|
+| Position A | 4164 / 64K×1 | 128 KB |
+| Position B | 41256 / 256K×1 | 512 KB |
+
+This was a very common upgrade strategy in mid-1980s computer systems.
+
+---
+
+# Why 4164 DRAM Makes Sense
+
+If Position A configures the system for:
+
+```text id="4rcsht"
+16 × 64K × 1 DRAMs
+```
+
+then total RAM becomes:
+
+```text id="jcyh7y"
+16 × 64K bits
+= 1024K bits
+= 128 KB
+```
+
+which exactly matches the observed POST memory count.
+
+This is currently the strongest evidence that:
+
+* Position A selects 64K DRAM mode
+* Position B selects 256K DRAM mode
+
+inside the GAVEMR.
+
+---
+
+# What the Jumpers Likely Change
+
+The jumpers probably alter several internal GAVEMR behaviors simultaneously.
+
+Possible changes include:
+
+* row address width
+* column address width
+* refresh row count
+* DRAM multiplexing geometry
+* memory bank decoding
+* POST memory sizing logic
+
+---
+
+# Address Geometry Differences
+
+## 4164 DRAM
+
+Typical geometry:
+
+```text id="9qyb7o"
+7-bit row
+7-bit column
+128 refresh rows
+```
+
+---
+
+## 41256 DRAM
+
+Typical geometry:
+
+```text id="viy5m4"
+8-bit row
+8-bit column
+256 refresh rows
+```
+
+The jumper likely informs the GAVEMR:
+
+* how many row bits to generate
+* how many refresh rows exist
+* how high memory addresses should be decoded
 
 ---
 
 # DRAM Refresh
 
-The GAVEMR almost certainly generates DRAM refresh cycles internally.
+The GAVEMR almost certainly generates DRAM refresh internally.
 
-Evidence:
+Evidence includes:
 
-* Dedicated RAS/CAS outputs
-* No separate DRAM controller IC present
-* Direct master clock input
-* Multiplexed DRAM addressing logic
-
-The refresh mechanism has not yet been fully characterized.
+* dedicated RAS/CAS outputs
+* direct master clock input
+* absence of discrete DRAM controller ICs
+* multiplexed DRAM addressing
 
 Possible refresh methods:
 
-* Distributed refresh
-* Burst refresh
+* distributed refresh
+* burst refresh
 * CAS-before-RAS refresh
 
-Future oscilloscope analysis of DRAM RAS/CAS timing should confirm the implementation.
+Future oscilloscope analysis of:
+
+* RAS
+* CAS
+* CPU READY
+
+should reveal the exact implementation.
 
 ---
 
 # Real Hardware Repair Discovery
 
-One major hardware failure was traced directly to the GAVEMR ROM decode path.
+One major hardware fault was traced directly to the GAVEMR ROM decode path.
 
 ## Failure
 
 Broken connection:
 
-```text
+```text id="m1l27i"
 GAVEMR → ROMID /CE
 ```
 
 Result:
 
-* System would not boot.
+```text id="v6w4fd"
+System would not boot
+```
 
-## Temporary Hardware Repair
+---
+
+# Temporary Hardware Repair
 
 A workaround was implemented using:
 
 * 74LS00 NAND gates
-* Existing ROMI control signals
+* existing ROMI control signals
 
-This recreated the missing ROM chip enable logic and restored successful system boot.
+This recreated the missing ROM enable logic and restored successful boot operation.
 
-This confirmed the GAVEMR is directly responsible for ROM decode control.
-
----
-
-# Suspected Internal Responsibilities
-
-The GAVEMR likely combines the functionality of several standard IBM PC support chips into a single Epson custom gate array.
-
-Probable functions include:
-
-* DRAM controller
-* DRAM refresh generator
-* Memory address decoder
-* Wait-state generator
-* ROM mapper
-* Bus arbitration
-* Video memory timing coordination
+This confirmed the GAVEMR directly generates ROM chip-enable signals.
 
 ---
 
 # Comparison to IBM PC Architecture
 
-The GAVEMR appears to replace functions normally handled by several discrete IBM PC support chips.
+The GAVEMR appears to replace the functionality normally handled by several discrete IBM PC support chips.
 
 Approximate equivalents:
 
 | IBM PC Function      | GAVEMR     |
 | -------------------- | ---------- |
-| 8284 clock support   | Integrated |
+| Clock support logic  | Integrated |
 | DRAM controller      | Integrated |
 | Refresh generator    | Integrated |
 | Address decode logic | Integrated |
 | Wait-state logic     | Integrated |
 
----
-
-# Outstanding Unknowns
-
-Several aspects of the GAVEMR remain unresolved:
-
-* Exact DRAM refresh timing
-* CPU wait-state generation
-* Memory arbitration behavior
-* Video/CPU memory contention
-* Internal clock division
-* Full memory map decode behavior
-
-Further reverse engineering and oscilloscope analysis are required.
+This highly integrated design reduced component count and gave Epson substantial flexibility in system configuration.
 
 ---
 
-# Current Understanding
+# Current Best Theory
 
-The GAVEMR is likely the central memory-management device of the Epson QX-11 architecture and one of the most important custom ICs in the system.
+The current evidence strongly suggests the GAVEMR is the central memory-management device of the QX-11 architecture.
 
-It coordinates:
+It likely coordinates:
 
 * CPU memory access
 * DRAM timing
-* ROM selection
-* refresh generation
-* system memory configuration
+* DRAM refresh
+* ROM mapping
+* wait-state insertion
+* memory configuration
+* bank decoding
 
 without relying on standard Intel support chipsets.
 
-This highly integrated design reduced component count and allowed Epson to implement a custom memory architecture around the 8088 CPU.
+The DRAM jumpers appear to configure the internal operating mode of the GAVEMR itself, allowing the same motherboard design to support both:
+
+* 64K DRAM systems
+* 256K DRAM systems
+
+using only jumper changes.
+
+---
+
+# Remaining Unknowns
+
+Several aspects remain unresolved:
+
+* exact jumper-to-pin mapping
+* full refresh timing implementation
+* CPU wait-state generation
+* memory arbitration behavior
+* exact bank decode logic
+* possible support for additional DRAM densities
+
+Further reverse engineering and oscilloscope analysis will be required.
