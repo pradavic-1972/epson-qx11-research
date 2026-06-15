@@ -140,7 +140,7 @@ These jumpers reroute ROM address lines and allow the motherboard to support mul
 
 # DRAM Configuration Jumpers
 
-A second set of jumpers near the GAVEMR appears to configure the installed DRAM type [PICTURE](photos/DRAM_TYPE.jpg).
+A second set of jumpers near the GAVEMR appears to configure the installed DRAM type [PICTURE](/photos/DRAM_TYPE.jpg).
 
 This discovery was made during testing of a QX-11 system populated with:
 
