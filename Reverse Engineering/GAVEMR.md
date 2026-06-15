@@ -126,7 +126,7 @@ Three jumpers near the GAVEMR configure ROM size support.
 | J2     | ROMI 16K / 32K  |
 | J3     | ROMI 32K / 64K  |
 
-The jumpers reroute ROM address lines, allowing multiple ROM sizes to be installed.
+The jumpers reroute ROM address lines, allowing multiple [ROM sizes](rom_expansion.md) to be installed.
 
 ---
 
