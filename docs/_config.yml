@@ -1,5 +1,15 @@
 title: Epson QX-11 Research Archive
-description: Reverse engineering, ROM dumps, schematics and mods for the Epson QX-11 computer.
+description: Technical findings, ROM dumps, schematics, photos, and reverse-engineering notes for the Epson QX-11 / QC-11 / Abacus computer.
 theme: minima
 markdown: kramdown
 show_downloads: false
+repository: pradavic-1972/epson-qx11-research
+
+header_pages:
+  - index.md
+  - reverse-engineering.md
+  - photos.md
+  - getting-started.md
+
+plugins:
+  - jekyll-seo-tag
