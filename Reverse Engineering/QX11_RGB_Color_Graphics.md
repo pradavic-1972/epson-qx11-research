@@ -98,8 +98,15 @@ There are several distinct stages between VRAM and the monitor:
 1. **Plane lookup**  
    The GAVDP/video circuitry fetches the blue, red, and green bits belonging to the same displayed pixel.
 
-2. **Logic combination in a 74HCT00**  
-   The video signals then enter a **74HCT00**, which contains four two-input NAND gates. The traced circuit shows that the QX-11 does not route every raw plane signal directly to the connector. Instead, the signals are combined, gated, and/or inverted in this NAND-logic stage.
+2. **Motherboard and ICRT RGB combination**  
+   The QX-11 motherboard GAVDP is the primary video generator. It produces its own red, green, and blue signals whether or not the ICRT card is installed.
+
+   When the optional ICRT card is present, the card supplies a second set of red, green, and blue signals. The motherboard RGB signals and the ICRT RGB signals are then combined in the following logic stage.
+
+   When the ICRT card is absent, only the GAVDP-generated RGB signals continue into that stage.
+
+3. **Logic combination in a 74HCT00**  
+   The motherboard GAVDP RGB signals and, when installed, the ICRT card RGB signals enter a **74HCT00**, which contains four two-input NAND gates. The traced circuit therefore uses the HC00 as the digital combining point between the two possible video sources.
 
    A NAND gate produces:
 
@@ -117,7 +124,7 @@ There are several distinct stages between VRAM and the monitor:
 
    The word **mixing** here refers to digital logic, not analog blending. The red, green, and blue outputs remain binary signals. Cyan, magenta, yellow, and white still result from asserting multiple primary outputs at the same time.
 
-3. **Buffering through a 74HC541**  
+4. **Buffering through a 74HC541**  
    The outputs from the 74HCT00 pass through a **74HC541** octal non-inverting tri-state buffer/line driver.
 
    The 74HC541 does not create additional colors and normally does not invert the signals:
@@ -130,23 +137,29 @@ There are several distinct stages between VRAM and the monitor:
 
    Its purpose is to isolate the gate-array/NAND logic from the external monitor cable and provide stronger, cleaner digital drive for the RGB and synchronization lines.
 
-4. **External RGB connection**  
+5. **External RGB connection**  
    The buffered signals leave the ICRT card as separate red, green, blue, horizontal-sync, and vertical-sync outputs.
 
-The confirmed output path is therefore:
+The confirmed output arrangement is therefore:
 
 ```text
-GAVDP / GAIBVD video signals
-             │
-             ▼
-       74HCT00 NAND logic
-   combination / inversion / gating
-             │
-             ▼
-       74HC541 line buffer
-             │
-             ▼
-     External RGB connector
+Motherboard GAVDP RGB ───────┐
+                             ├──► 74HCT00 combining logic ──► 74HC541 ──► RGB output
+Optional ICRT card RGB ──────┘
+```
+
+Without the ICRT card:
+
+```text
+Motherboard GAVDP RGB ─────────► 74HCT00 ──► 74HC541 ──► RGB output
+```
+
+With the ICRT card installed:
+
+```text
+Motherboard GAVDP RGB ───────┐
+                             ├──► 74HCT00 ──► 74HC541 ──► RGB output
+ICRT card RGB ───────────────┘
 ```
 
 The use of HCT logic at the NAND stage is also significant: a 74HCT00 uses TTL-compatible input thresholds while operating from a 5 V CMOS supply, making it well suited to receive signals from the surrounding Epson gate-array and TTL-era circuitry.
@@ -173,24 +186,21 @@ The currently traced nine-pin inline video connector includes:
 
 This is a **separate-sync RGB interface**: the color channels are carried independently, and horizontal and vertical synchronization are also separate.
 
-The RGB outputs traced on the ICRT card originate in the video-output section associated with the GAIBVD circuitry. For example, the red path has been traced from GAIBVD pin 34 into the card’s discrete logic.
+The motherboard GAVDP is the base video source. Its red, green, and blue signals are present independently of the ICRT card.
 
-The traced sequence is:
+The optional ICRT card generates an additional set of red, green, and blue signals. Those card signals are routed back into the motherboard video-output logic, where they meet the GAVDP RGB signals at the 74HCT00 stage.
+
+The traced sequence is therefore:
 
 ```text
-GAIBVD output
-      │
-      ▼
-74HCT00 NAND gate stage
-      │
-      ▼
-74HC541 non-inverting line driver
-      │
-      ▼
-External video connector
+GAVDP red/green/blue ─────────┐
+                              ├──► 74HCT00 ──► 74HC541 ──► External RGB connector
+ICRT red/green/blue ──────────┘
 ```
 
-The 74HCT00 performs the required digital combination, polarity correction, and/or blanking logic. The 74HC541 then buffers those completed video signals before they travel through the cable to the monitor.
+If the ICRT card is not installed, its inputs are absent and the GAVDP RGB signals alone pass through the HC00 and then the HC541.
+
+The ICRT card should therefore be understood as an optional video source or overlay/contributor, not as the QX-11’s main video card.
 
 ---
 
@@ -530,7 +540,7 @@ The following details still require hardware tracing or controlled experiments:
 - Exact electrical voltage levels of red, green, and blue.
 - Output impedance of each color channel.
 - Whether the external RGB signals are strict TTL levels or resistor-shaped levels intended for the Epson monitor.
-- Exact pin-by-pin Boolean equations between GAIBVD, the 74HCT00 NAND gates, and the 74HC541 inputs.
+- Exact pin-by-pin Boolean equations combining the motherboard GAVDP RGB signals with the optional ICRT RGB signals in the 74HCT00, and their routing into the 74HC541.
 - Exact function of connector pin 9.
 - Whether any undocumented mode provides intensity or palette control.
 - Complete relationship between the `8000h`, `8008h`, and `9000h` CPU-visible selections and the six physical VRAM DRAM devices.
@@ -587,36 +597,24 @@ The current best model of QX-11 color rendering is:
 
 ```text
 Blue VRAM bit  ──┐
-Red VRAM bit   ──┼──► GAVDP / GAIBVD ──► 74HCT00 ──► 74HC541 ──► RGB connector
-Green VRAM bit ──┘                         NAND        output
-                                           logic       buffer
+Red VRAM bit   ──┼──► Motherboard GAVDP ──┐
+Green VRAM bit ──┘                        │
+                                         ├──► 74HCT00 ──► 74HC541 ──► RGB connector
+Optional ICRT RGB outputs ────────────────┘
 
-Display timing ─────► GAVDP / GAIBVD ──► 74HCT00 ──► 74HC541 ──► HSync / VSync
+Display timing ───────────► Motherboard video logic ──► HSync / VSync
 ```
 
-A more detailed interpretation is:
+The key architectural point is:
 
 ```text
-Three synchronized
-one-bit pixel values
-        │
-        ▼
-GAVDP / GAIBVD video generation
-        │
-        ▼
-74HCT00
-• NAND combination
-• polarity correction
-• display gating / blanking
-        │
-        ▼
-74HC541
-• non-inverting buffering
-• cable-driving isolation
-        │
-        ▼
-Separate R, G, B, HSync and VSync lines
+Motherboard GAVDP = primary video source
+ICRT card         = optional additional RGB source
+74HCT00           = digital combination point
+74HC541           = final output buffer
 ```
+
+Without the ICRT card, the GAVDP still produces normal video and its RGB signals continue through the HC00 and HC541 to the monitor.
 
 For every pixel position, the three plane bits are presented simultaneously. The resulting combination directly selects one of eight additive RGB colors.
 
