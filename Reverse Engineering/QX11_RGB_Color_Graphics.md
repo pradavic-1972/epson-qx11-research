@@ -93,15 +93,65 @@ The monitor performs the optical addition of the three primaries. The computer t
 
 ### Logical mixing versus electrical mixing
 
-There are two separate stages:
+There are several distinct stages between VRAM and the monitor:
 
-1. **Logical combination**  
-   The GAVDP/video circuitry fetches one bit from each plane for the same pixel.
+1. **Plane lookup**  
+   The GAVDP/video circuitry fetches the blue, red, and green bits belonging to the same displayed pixel.
 
-2. **Electrical output stage**  
-   The three binary color states are driven onto the physical red, green, and blue output lines through the ICRT video card circuitry.
+2. **Logic combination in a 74HCT00**  
+   The video signals then enter a **74HCT00**, which contains four two-input NAND gates. The traced circuit shows that the QX-11 does not route every raw plane signal directly to the connector. Instead, the signals are combined, gated, and/or inverted in this NAND-logic stage.
 
-The logical behavior is confirmed. The exact voltage levels, output impedance, and complete resistor/transistor path should still be measured or traced before describing the connector as electrically compatible with a particular TTL-RGB standard.
+   A NAND gate produces:
+
+   ```text
+   Y = NOT (A AND B)
+   ```
+
+   With its inputs connected together, it also works as an inverter:
+
+   ```text
+   Y = NOT A
+   ```
+
+   This makes the 74HCT00 suitable for applying display-enable or blanking control, correcting signal polarity, and combining the color data with timing/control signals before the output-buffer stage.
+
+   The word **mixing** here refers to digital logic, not analog blending. The red, green, and blue outputs remain binary signals. Cyan, magenta, yellow, and white still result from asserting multiple primary outputs at the same time.
+
+3. **Buffering through a 74HC541**  
+   The outputs from the 74HCT00 pass through a **74HC541** octal non-inverting tri-state buffer/line driver.
+
+   The 74HC541 does not create additional colors and normally does not invert the signals:
+
+   ```text
+   HC541 output = HC541 input
+   ```
+
+   when both active-low output-enable inputs are asserted.
+
+   Its purpose is to isolate the gate-array/NAND logic from the external monitor cable and provide stronger, cleaner digital drive for the RGB and synchronization lines.
+
+4. **External RGB connection**  
+   The buffered signals leave the ICRT card as separate red, green, blue, horizontal-sync, and vertical-sync outputs.
+
+The confirmed output path is therefore:
+
+```text
+GAVDP / GAIBVD video signals
+             │
+             ▼
+       74HCT00 NAND logic
+   combination / inversion / gating
+             │
+             ▼
+       74HC541 line buffer
+             │
+             ▼
+     External RGB connector
+```
+
+The use of HCT logic at the NAND stage is also significant: a 74HCT00 uses TTL-compatible input thresholds while operating from a 5 V CMOS supply, making it well suited to receive signals from the surrounding Epson gate-array and TTL-era circuitry.
+
+The logical path through the 74HCT00 and 74HC541 has been traced. The exact Boolean equation implemented by every NAND gate, the voltage presented under monitor load, and the output impedance of each external line should still be documented individually before claiming compatibility with a specific RGB electrical standard.
 
 ---
 
@@ -123,7 +173,24 @@ The currently traced nine-pin inline video connector includes:
 
 This is a **separate-sync RGB interface**: the color channels are carried independently, and horizontal and vertical synchronization are also separate.
 
-The RGB outputs traced on the ICRT card ultimately originate in the video-output section associated with the GAIBVD circuitry. For example, the red path has been traced from GAIBVD pin 34 through the card circuitry to the external connector.
+The RGB outputs traced on the ICRT card originate in the video-output section associated with the GAIBVD circuitry. For example, the red path has been traced from GAIBVD pin 34 into the card’s discrete logic.
+
+The traced sequence is:
+
+```text
+GAIBVD output
+      │
+      ▼
+74HCT00 NAND gate stage
+      │
+      ▼
+74HC541 non-inverting line driver
+      │
+      ▼
+External video connector
+```
+
+The 74HCT00 performs the required digital combination, polarity correction, and/or blanking logic. The 74HC541 then buffers those completed video signals before they travel through the cable to the monitor.
 
 ---
 
@@ -463,7 +530,7 @@ The following details still require hardware tracing or controlled experiments:
 - Exact electrical voltage levels of red, green, and blue.
 - Output impedance of each color channel.
 - Whether the external RGB signals are strict TTL levels or resistor-shaped levels intended for the Epson monitor.
-- Complete role of the GAIBVD output circuitry.
+- Exact pin-by-pin Boolean equations between GAIBVD, the 74HCT00 NAND gates, and the 74HC541 inputs.
 - Exact function of connector pin 9.
 - Whether any undocumented mode provides intensity or palette control.
 - Complete relationship between the `8000h`, `8008h`, and `9000h` CPU-visible selections and the six physical VRAM DRAM devices.
@@ -477,7 +544,7 @@ The following details still require hardware tracing or controlled experiments:
 1. Display solid black, blue, red, green, cyan, magenta, yellow, and white screens.
 2. Measure each RGB output relative to ground for all eight combinations.
 3. Compare unloaded voltage with the voltage connected to the original monitor.
-4. Trace each channel from the connector back through resistors, transistors, and GAIBVD pins.
+4. Record each channel from the connector back through the 74HC541, the 74HCT00, and the corresponding GAIBVD pin.
 5. Capture RGB timing relative to the approximately 14.318 MHz connector clock.
 6. Verify whether color edges change only on one phase or division of that clock.
 7. Test writes to identical offsets in `8000h`, `8008h`, and `9000h`.
@@ -519,13 +586,36 @@ The following details still require hardware tracing or controlled experiments:
 The current best model of QX-11 color rendering is:
 
 ```text
-                    ┌─────────────────┐
-Blue VRAM bit ─────►│                 │────► Blue output
-Red VRAM bit  ─────►│ GAVDP / ICRT    │────► Red output
-Green VRAM bit ────►│ video pipeline  │────► Green output
-                    │                 │────► HSync
-Display timing ────►│                 │────► VSync
-                    └─────────────────┘
+Blue VRAM bit  ──┐
+Red VRAM bit   ──┼──► GAVDP / GAIBVD ──► 74HCT00 ──► 74HC541 ──► RGB connector
+Green VRAM bit ──┘                         NAND        output
+                                           logic       buffer
+
+Display timing ─────► GAVDP / GAIBVD ──► 74HCT00 ──► 74HC541 ──► HSync / VSync
+```
+
+A more detailed interpretation is:
+
+```text
+Three synchronized
+one-bit pixel values
+        │
+        ▼
+GAVDP / GAIBVD video generation
+        │
+        ▼
+74HCT00
+• NAND combination
+• polarity correction
+• display gating / blanking
+        │
+        ▼
+74HC541
+• non-inverting buffering
+• cable-driving isolation
+        │
+        ▼
+Separate R, G, B, HSync and VSync lines
 ```
 
 For every pixel position, the three plane bits are presented simultaneously. The resulting combination directly selects one of eight additive RGB colors.
