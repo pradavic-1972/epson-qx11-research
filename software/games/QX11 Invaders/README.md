@@ -2,6 +2,8 @@
 
 ## A Native 640×200, 8-Color Arcade Game for the Epson QX-11
 
+![Splash Screen](qx11-invaders.png)
+
 This project is a complete **Space Invaders-inspired arcade game** written in 8086 assembly language specifically for the Epson QX-11.
 
 The goal was not to reproduce the original arcade game pixel-for-pixel. Instead, the project became an experiment in using the QX-11 as a native game platform and documenting hardware capabilities that were rarely used by commercial software.
