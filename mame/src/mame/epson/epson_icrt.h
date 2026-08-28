@@ -25,6 +25,7 @@ public:
 	u8 map_reg()   const { return m_map; }
 	u8 plantronics_reg() const { return m_plantronics; }
     bool active()  const { return m_active; }
+	void set_monochrome_output(bool monochrome) { m_monochrome_output = monochrome; }
 
 protected:
 	// device_t
@@ -123,6 +124,7 @@ private:
 	u8  m_plantronics = 0;
 	u8  m_palette_lut_2bpp[4] = {};
 	int m_update_row_type = ICRT_TEXT_INTEN;
+	bool m_monochrome_output = true;
 };
 
 DECLARE_DEVICE_TYPE(EPSON_ICRT, epson_icrt_device)

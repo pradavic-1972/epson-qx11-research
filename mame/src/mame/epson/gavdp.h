@@ -127,6 +127,7 @@ private:
 	void render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	void render_mode_color(bitmap_rgb32 &bitmap, const rectangle &cliprect);
 	int  effective_scroll_px() const;
+	u32  horizontal_scroll_cols() const;
 	void trace_clear_write(bool is_9000, offs_t offset, u8 data, u32 xbyte, u32 canon_y);
 	void trace_clear_reject(bool is_9000, offs_t offset, u8 data);
 	void trace_flush_clear(const char *reason);

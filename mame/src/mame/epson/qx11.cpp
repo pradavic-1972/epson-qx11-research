@@ -30,15 +30,15 @@ public:
         , m_ram(*this, "ram")
         , m_gavnit(*this, "gavnit")
         , m_gavnio(*this, "gavnio")
-        , m_epkbd (*this, "m_epkbd")
         , m_gavdp(*this,"gavdp")
         , m_psg(*this, "sn76489")
         , m_rtc(*this, "rtc")
-        , m_gafddc(*this, "gafddc")
         , m_fdc(*this, "upd765")
+        , m_epkbd (*this, "m_epkbd")
+        , m_gafddc(*this, "gafddc")
         , m_floppy(*this, "upd765:%u", 0U) 
         , m_hd(*this, "epson_hd")
-        
+
         , m_screen(*this, "screen")
         , m_icrt(*this, "icrt")
         //, m_vram8000(*this, "vram8000")
@@ -109,7 +109,7 @@ void qx11_state::serial_io7_w(u8 data){
 u32 qx11_state::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
     if (m_icrt->active()) {
-        
+
         return m_icrt->screen_update(screen, bitmap, cliprect);
     }
 
@@ -125,8 +125,9 @@ void qx11_state::mem_map(address_map &map)
     // ICRT Video RAM Mapping
     // Color (CGA-style) 32K
     map(0xB8000, 0xBFFFF).m(m_icrt, FUNC(epson_icrt_device::vram_map_color));
-    // Mono (MDA-style) at least 4K; many adapters mirror more. Start with 4K.
-    map(0xB0000, 0xB0FFF).m(m_icrt, FUNC(epson_icrt_device::vram_map_mono));
+    // APX-ICRT VM6 exposes the complete 32 KiB framebuffer here.  The four
+    // 8 KiB scanline banks begin at B0000, B2000, B4000 and B6000.
+    map(0xB0000, 0xB7FFF).m(m_icrt, FUNC(epson_icrt_device::vram_map_mono));
 
 
     
@@ -374,6 +375,7 @@ ROM_START(qx11)
     ROM_REGION(0x800, "ibm_font", 0)
     ROM_LOAD("STANDARD.FNT", 0x0000, 0x0800, CRC(0) SHA1())
     
-ROM_END
+
+    ROM_END
 
 COMP(1983, qx11, 0, 0, qx11, qx11, qx11_state, empty_init, "Epson", "QX-11 (skeleton, 512K)", MACHINE_NOT_WORKING)

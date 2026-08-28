@@ -353,12 +353,24 @@ void gavdp_device::update_geometry_from_profile()
 
 int gavdp_device::effective_scroll_px() const
 {
-    const u32 c663 = reg_read(REG_C663_OFFSET) & 0xff;
-    const u32 c462 = reg_read(REG_C462_OFFSET) & 0xff;
+	const u32 c663 = reg_read(REG_C663_OFFSET) & 0xff;
+	const u32 c462 = reg_read(REG_C462_OFFSET) & 0xff;
 
-	 
-    return (c663 + ((c462 & 0x80) ? 200u : 0u)) % 400u;
-	
+	// C462 bit 7 selects the other 200-line half.  Its low seven bits are
+	// the horizontal display start and are handled by horizontal_scroll_cols().
+	return (c663 + ((c462 & 0x80) ? 200u : 0u)) % 400u;
+}
+
+u32 gavdp_device::horizontal_scroll_cols() const
+{
+	// The display-start granularity is one VRAM byte (eight pixels).  Real
+	// hardware has an empirical discontinuity at 5f -> 60: that increment
+	// advances four columns, after which single-column increments resume.
+	u32 origin = reg_read(REG_C462_OFFSET) & 0x7f;
+	if (origin >= 0x60)
+		origin += 3;
+
+	return origin % VRAM_COLS;
 }
 
 void gavdp_device::trace_clear_write(bool is_9000, offs_t offset, u8 data, u32 xbyte, u32 canon_y)
@@ -828,6 +840,7 @@ void gavdp_device::render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &clipr
 
 	const u32 scroll_mod = (m_visible_height == 200) ? 200u : 400u;
 	const u32 scroll_base = (u32)effective_scroll_px() % scroll_mod;
+	const u32 horizontal_base = (m_visible_cols == VRAM_COLS && height == 400) ? horizontal_scroll_cols() : 0;
 
 	for (int y = cliprect.min_y; y <= cliprect.max_y && y < height; ++y)
 	{
@@ -838,7 +851,8 @@ void gavdp_device::render_mode_mono(bitmap_rgb32 &bitmap, const rectangle &clipr
 
 		for (int x = cliprect.min_x; x <= cliprect.max_x && x < width; ++x)
 		{
-			const int col = x >> 3;
+			const int display_col = x >> 3;
+			const int col = (display_col + int(horizontal_base)) % m_visible_cols;
 			if (col < 0 || col >= m_visible_cols)
 			{
 				bitmap.pix(y, x) = rgb_t::black();

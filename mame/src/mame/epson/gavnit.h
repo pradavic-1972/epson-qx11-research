@@ -49,7 +49,7 @@ public:
     void set_line_vector(int line, u8 vector);
 
     // Optional tuning for the internal timer
-    void set_fractional_prescale(unsigned num, unsigned den);  // default 11/96
+    void set_fractional_prescale(unsigned num, unsigned den);  // default 5/96
     void set_default_step(u16 step);                           // default 0x0600
 
     void fdc_intrq_w(int state);
@@ -76,10 +76,11 @@ private:
     u16 m_step          = 0x0600;      // Δ between deadlines
     u16 m_default_step  = 0x0600;
 
-    // fractional prescale (default 11/96)
-    unsigned m_ps_num   = 11;
+    // fractional prescale (default 5/96): 14.7456 MHz -> 768 kHz.
+    // With the default 0x0600 step, this yields the measured 500 Hz INTR rate.
+    unsigned m_ps_num   = 5;
     unsigned m_ps_den   = 96;
-    double   m_base_hz  = 1'689'600.0;
+    double   m_base_hz  = 768'000.0;
 
     // interrupt bitmaps
     u16 m_irr = 0x0000;                // pending (set by sources)

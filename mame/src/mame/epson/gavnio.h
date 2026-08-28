@@ -59,6 +59,8 @@ protected:
     // Timer: drives the keyboard clock line and samples TXD
     TIMER_CALLBACK_MEMBER(bitclk_cb);
 
+    virtual ioport_constructor device_input_ports() const override;
+
 private:
     // ----- constants -----
     // Keyboard line: 1200 bps, 11-bit frame (1 start, 8 data, parity, stop).

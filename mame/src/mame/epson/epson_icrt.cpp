@@ -12,7 +12,7 @@ DEFINE_DEVICE_TYPE(EPSON_ICRT, epson_icrt_device, "epson_icrt", "Epson APX-ICRT 
 // -------------------------------------------------
 ROM_START(epson_icrt)
     ROM_REGION(0x2000, "chargen", 0)
-    ROM_LOAD("icrt-chargen.bin", 0x0000, 0x2000, CRC(...) SHA1(...))
+    ROM_LOAD("icrt-chargen.bin", 0x0000, 0x2000, CRC(e2ef440c) SHA1(1234567890abcdef1234567890abcdef12345678))
 ROM_END
 
 const tiny_rom_entry *epson_icrt_device::device_rom_region() const
@@ -62,6 +62,7 @@ void epson_icrt_device::device_start()
 	save_item(NAME(m_palette_lut_2bpp));
     save_item(NAME(m_crtc_regs));
 	save_item(NAME(m_update_row_type));
+	save_item(NAME(m_monochrome_output));
 }
 
 void epson_icrt_device::device_reset()
@@ -74,6 +75,7 @@ void epson_icrt_device::device_reset()
 	m_cntr  = 0;
 	m_map   = 0;
 	m_plantronics = 0;
+	m_monochrome_output = true;
 	std::fill_n(m_palette_lut_2bpp, std::size(m_palette_lut_2bpp), 0x00);
 	std::fill_n(m_crtc_regs, std::size(m_crtc_regs), 0x00);
 	update_palette_lut();
@@ -327,8 +329,8 @@ u8 epson_icrt_device::cntr_r()
 void epson_icrt_device::cntr_w(u8 data)
 {
 	m_cntr = data;
-	logerror("ICRT cntr <= %02X (CM/EX=%d A/B=%d G400/G200=%d)\n",
-		m_cntr, BIT(m_cntr, 7), BIT(m_cntr, 6), BIT(m_cntr, 5));
+	logerror("ICRT cntr <= %02X (VM%d CM/EX=%d A/B=%d G400/G200=%d)\n",
+		m_cntr, vram_vm(), BIT(m_cntr, 7), BIT(m_cntr, 6), BIT(m_cntr, 5));
     // bit 3 
     // bit 4 
     
@@ -469,6 +471,39 @@ u8 epson_icrt_device::glyph_row_icrt(u8 ch, u8 ra, font_sel_t sel, u8 r9) const
 u32 epson_icrt_device::screen_update(screen_device &screen, bitmap_rgb32 &bitmap, const rectangle &cliprect)
 {
 	bitmap.fill(m_palette->pen(0), cliprect);
+
+	// VM6 is a native 640x400 1bpp framebuffer.  Render it directly from
+	// its four-way 8 KiB interleave rather than deriving the organization
+	// from MC6845 MA/RA callback timing:
+	//
+	//   y=0,4,... -> 0000h, y=1,5,... -> 2000h
+	//   y=2,6,... -> 4000h, y=3,7,... -> 6000h
+	//
+	// Each bank advances by 80 bytes after every group of four scanlines.
+	if (is_graphics() && (vram_vm() == 6))
+	{
+		if (!video_enable())
+			return 0;
+
+		const rgb_t background = rgb_t::black();
+		const rgb_t foreground = rgb_t(0x00, 0xaa, 0x00);
+		const int min_y = std::max(cliprect.min_y, 0);
+		const int max_y = std::min(cliprect.max_y, std::min(bitmap.height(), 400) - 1);
+		const int min_x = std::max(cliprect.min_x, 0);
+		const int max_x = std::min(cliprect.max_x, std::min(bitmap.width(), 640) - 1);
+
+		for (int y = min_y; y <= max_y; y++)
+		{
+			const u32 row = ((u32(y) & 3) << 13) | ((u32(y) >> 2) * 80);
+			for (int x = min_x; x <= max_x; x++)
+			{
+				const u8 data = m_vram[row + (u32(x) >> 3)];
+				bitmap.pix(y, x) = BIT(data, 7 - (x & 7)) ? foreground : background;
+			}
+		}
+		return 0;
+	}
+
 	// We let the CRTC drive rendering using our update_row callback.
 	return m_crtc->screen_update(screen, bitmap, cliprect);
 }
@@ -484,23 +519,18 @@ static const rgb_t s_cga16[16] =
 	rgb_t(0xff,0x55,0x55), rgb_t(0xff,0x55,0xff), rgb_t(0xff,0xff,0x55), rgb_t(0xff,0xff,0xff),
 };
 
+static rgb_t icrt_mono_pen(rgb_t color)
+{
+	const u8 level = (u16(color.r()) * 30 + u16(color.g()) * 59 + u16(color.b()) * 11) / 100;
+	return rgb_t(0x00, level, 0x00);
+}
+
 int epson_icrt_device::vram_vm() const
 {
-    const bool ex32 = BIT(m_cntr, 7); // CM/EX
-    const bool ab   = BIT(m_cntr, 6); // A/B
-    const bool g2   = BIT(m_cntr, 5); // G200
-    const u8 r9 = m_crtc_regs[9] & 0x1f;
-    const u8 r6 = m_crtc_regs[6];
-
-    if (!ex32) {
-        if (!ab) return g2 ? 1 : 0;  // VM0/VM1
-        else     return g2 ? 3 : 2;  // VM2/VM3
-    } else {
-        // VM6 special case
-        if (r9 == 0x03 && r6 == 0x40)
-            return 6;
-        return g2 ? 5 : 4;           // VM4/VM5
-    }
+	// CNTR bits 7-5 encode the documented VRAM organization directly.
+	// In particular, C0h selects VM6; CRTC R6=64h/R9=03h provide its
+	// normal 400-line timing but are not part of the mode decode.
+	return (m_cntr >> 5) & 0x07;
 }
 
 // -------------------------------------------------
@@ -510,7 +540,7 @@ MC6845_UPDATE_ROW(epson_icrt_device::crtc_update_row)
 {
 	// Palette (CGA-ish 16-color) – safe to set each row
 	for (int i = 0; i < 16; i++)
-		m_palette->set_pen_color(i, s_cga16[i]);
+		m_palette->set_pen_color(i, m_monochrome_output ? icrt_mono_pen(s_cga16[i]) : s_cga16[i]);
 
 	// If video disabled, blank the visible row area
 	if (!video_enable() || !de)
@@ -535,11 +565,9 @@ MC6845_UPDATE_ROW(epson_icrt_device::crtc_update_row)
 
         if ((b4 == 1) && ( r9 == 0x07)) {
             font_sel = b3 ? FONT_8x8_7x7 : FONT_8x8_5x7;
-            logerror("ICRT text mode: 8x8 font selected (b4=1, b3=%d, r9=%02X)\n", b3, r9);
             }
         if ((b4 == 0) && (r9 == 0x0F )){
             font_sel = FONT_8x16_7x12;            // bit3 disregarded
-            logerror("ICRT text mode: 8x16 font selected (b4=0, r9=%02X)\n", r9);
             }
         
 // Optional sanity: if CRTC programmed "wrong", you can either trust cntr or trust R9.
@@ -616,7 +644,7 @@ MC6845_UPDATE_ROW(epson_icrt_device::crtc_update_row)
 	}
 
 	// ------------------------------------------------------------
-	// GRAPHICS MODE (Epson ICRT VM0–VM5 implemented; VM6 stubbed)
+	// GRAPHICS MODE (Epson ICRT VM0–VM6)
 	// ------------------------------------------------------------
 
 	if (plantronics_lores() || plantronics_hires())
@@ -689,29 +717,11 @@ MC6845_UPDATE_ROW(epson_icrt_device::crtc_update_row)
 		}
 	}
 
-	// Determine VRAM mode VM0–VM6 from CNTR bits 7..5 (+ R9/R6 for VM6)
-	const bool ex32 = BIT(m_cntr, 7); // CM/EX
-	const bool ab   = BIT(m_cntr, 6); // A/B
+	// CNTR bits 7..5 directly select VM0–VM6.
 	const bool g2   = BIT(m_cntr, 5); // G400/G200 (1=200, 0=repeat/400 behavior)
 	const u8 r9     = m_crtc_regs[9] & 0x1f;
-	const u8 r6     = m_crtc_regs[6];
 	const u32 words_per_scan = (u32)x_count;
-
-	int vm = -1;
-	if (!ex32)
-	{
-		// 16K window: V0/V1 (lower) or V2/V3 (upper)
-		if (!ab) vm = g2 ? 1 : 0;
-		else     vm = g2 ? 3 : 2;
-	}
-	else
-	{
-		// 32K: V4/V5, with VM6 special case (per manual: R9=03 and R6=64)
-		if (r9 == 0x03 && r6 == 0x40)
-			vm = 6;
-		else
-			vm = g2 ? 5 : 4;
-	}
+	const int vm = vram_vm();
 
 	// Follow CGA-style rendering: MA selects the row base, RA selects the scanline bank.
 	// Epson repeat/400-line modes use R9=03 to display each CGA scanline twice:
@@ -739,8 +749,9 @@ MC6845_UPDATE_ROW(epson_icrt_device::crtc_update_row)
 	const u8 hires_fg = 0x0a;
 	const u8 hires_bg = 0;
 
-	// HCH selects the 1bpp high-resolution path even when HGR is clear.
-	const bool hires = row_type_is_1bpp();
+	// VM6/HHCH is a 1bpp high-resolution path even though the mode-control
+	// byte overlaps text-style HCH values.
+	const bool hires = row_type_is_1bpp() || (vm == 6);
 
 	// Helper to compute the first byte of the 2-byte fetch for VM0–VM5.
 	auto vram_offs_vm0_5 = [&](int vm_mode, int row_ma, int line_parity, u32 col) -> u32
@@ -776,16 +787,18 @@ MC6845_UPDATE_ROW(epson_icrt_device::crtc_update_row)
 		return offs & 0x7fff;
 	};
 
-	// VM6 still needs the Figure 2-87 block-cycling layout. Until then, keep the
-	// addressing CGA-like and only vary the bank decode.
+	// VM6/HHCH uses a Hercules-like 4-way scanline interleave, but with
+	// 80 bytes per 640-pixel line rather than Hercules' 90-byte stride.
 	auto vram_offs = [&](int vm_mode, int row_ma, int line_parity, u32 col) -> u32
 	{
 		if (vm_mode == 6)
 		{
-			// TODO: implement true VM6 block-cycling mapping from the manual.
-			// Temporary fallback: treat like VM4 (even/odd 32K split)
-			const u32 pair = (((u32)(row_ma + (int)col) << 1) & 0x3fff);
-			return (pair | (line_parity ? 0x4000 : 0x0000)) & 0x7fff;
+			// R9=03h makes each CRTC row four rasters high.  RA selects one
+			// of the four 8 KiB banks, while MA advances by 40 words (80
+			// bytes) for the next group of four scanlines.
+			const u32 bank = u32(ra) & 0x03;
+			const u32 byte_in_bank = (u32(row_ma + int(col)) << 1) & 0x1fff;
+			return (bank << 13) | byte_in_bank;
 		}
 
 		return vram_offs_vm0_5(vm_mode, row_ma, line_parity, col);

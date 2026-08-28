@@ -7,6 +7,22 @@
 
 DEFINE_DEVICE_TYPE(EPSON_GAVNIO, epson_gavnio_device, "epson_gavnio", "Epson QX-11 GAVNIO Gate Array")
 
+
+static INPUT_PORTS_START(gavnio)
+    PORT_START("JOY1")
+    PORT_BIT(0x07, IP_ACTIVE_HIGH, IPT_UNUSED)
+    PORT_BIT(0x08, IP_ACTIVE_HIGH, IPT_JOYSTICK_RIGHT) PORT_PLAYER(1)
+    PORT_BIT(0x10, IP_ACTIVE_HIGH, IPT_JOYSTICK_LEFT)  PORT_PLAYER(1)
+    PORT_BIT(0x20, IP_ACTIVE_HIGH, IPT_JOYSTICK_DOWN)  PORT_PLAYER(1)
+    PORT_BIT(0x40, IP_ACTIVE_HIGH, IPT_JOYSTICK_UP)    PORT_PLAYER(1)
+    PORT_BIT(0x80, IP_ACTIVE_HIGH, IPT_BUTTON1)        PORT_PLAYER(1)
+INPUT_PORTS_END
+
+ioport_constructor epson_gavnio_device::device_input_ports() const
+{
+    return INPUT_PORTS_NAME(gavnio);
+}
+
 //-------------------------------------------------
 //  construction
 //-------------------------------------------------
@@ -89,6 +105,7 @@ void epson_gavnio_device::device_reset()
     // Make sure keyboard RX line is idle-high (mark).
     m_kbd_rxd(1);
     m_post_ready = false;
+    m_joy1_enabled = false;
 
     // Start the keyboard clock – 1200 bps, two phases per bit (high+low).
     const int bitclk_hz = KBD_BAUD * KBD_TICKS_PER_BIT;
@@ -486,16 +503,30 @@ void epson_gavnio_device::status_w(u8 data)
 
 u8 epson_gavnio_device::floppy_status_r()
 {
+    // For MAME testing we emulate only joystick #1.
+    // BIOS joystick #1 access is unambiguous:
+    //
+    //      OUT 0Fh,20h
+    //      IN  0Eh
+    //
+    // While joystick #1 is selected, port 0Eh returns the real QX-11
+    // joystick format. Bit 0 is always set on real hardware.
+    if (m_joy1_enabled)
+    {
+        const u8 result = 0x01 | ioport("JOY1")->read();
+
+        if (!machine().side_effects_disabled())
+            logerror("GAVNIO: JOY1 read -> %02X\n", result);
+
+        return result;
+    }
+
     u8 result = 0xff;
 
     if (m_gafddc)
         result = m_gafddc->status_r();
 
-    //logerror("GAVNIO: floppy_status_r -> %02X\n", result);
-    if (m_joy1_enabled)
-        return result | 11010000;
-    else 
-        return result;
+    return result;
 }
 
 void epson_gavnio_device::floppy_control_w(u8 data)
@@ -503,17 +534,23 @@ void epson_gavnio_device::floppy_control_w(u8 data)
     if (!machine().side_effects_disabled())
         logerror("GAVNIO: floppy_control_w <- %02X\n", data);
 
-    if (data == 0x00) {
-        
-        logerror("GAVNIO: Joystick control write: %02X\n", data);
-        m_joy1_enabled = false;
-    }
+    // Port 0Fh is shared with floppy control.
+    //
+    // Confirmed floppy writes:
+    //      04h -> drive A
+    //      08h -> drive B
+    //      followed immediately by 00h
+    //
+    // Joystick #0 also uses 00h, so it is intentionally not emulated here.
+    // Joystick #1 uses the unambiguous selector 20h.
+    //
+    // Any write other than 20h returns port 0Eh to normal floppy status.
+    m_joy1_enabled = (data == 0x20);
 
-    if (data & 0x20) {
-        logerror("GAVNIO: Joystick control write: %02X\n", data);
-        m_joy1_enabled = false;
-    }
+    if (!machine().side_effects_disabled() && m_joy1_enabled)
+        logerror("GAVNIO: joystick #1 selected\n");
 
+    // Preserve existing GAFDDC behavior on this shared port.
     if (m_gafddc)
         m_gafddc->control_w(data);
 }
