@@ -320,12 +320,12 @@ This section documents everything known so far.
 
 | Reg # | Physical Address | Name / Purpose         | Status                     |
 |-------|------------------|------------------------|----------------------------|
-| R0    | 0x8C663          | VERT_SCROLL_IDX             | Fully decoded              |
-| R1    | 0x8D068          | MODE_FLAGS             | Fully decoded (bit 8 critical) |
+| R0    | [0x8C663](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | VERT_SCROLL_IDX             | Fully decoded              |
+| R1    | [0x8D068](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | MODE_FLAGS             | Fully decoded (bit 8 critical) |
 | R2    | 0x8D269          | ATTR_LATCH             | Fully decoded / used       |
 | R3    | 0x8C060    | Internal GAVDP ctrl    | Known written, unknown use |
 | R4    | 0x8C261              | Internal GAVDP ctrl    | Known written, unknown use |
-| R5    | 0x8C462             | HORIZ_SCROLL_IDX   | Control Horizontal shift / VRAM index |
+| R5    | [0x8C462](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)             | HORIZ_SCROLL_IDX   | Control Horizontal shift / VRAM index |
 | R6    | 0x8D46A          | Internal GAVDP ctrl    | Known written, unknown use |
 | R7    | 0x8C864              | Internal GAVDP ctrl    | Known written, unknown use |
 | R8    | 0x8CA65            | Internal GAVDP ctrl    | Known written, unknown use |
