@@ -321,7 +321,7 @@ This section documents everything known so far.
 | Reg # | Physical Address | Name / Purpose         | Status                     |
 |-------|------------------|------------------------|----------------------------|
 | R0    | [0x8C663](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | VERT_SCROLL_IDX             | Fully decoded              |
-| R1    | [0x8D068](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | MODE_FLAGS             | Fully decoded (bit 8 critical) |
+| R1    | [0x8D068](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | VRAM Organization             | Fully decoded (bit 8 critical) |
 | R2    | 0x8D269          | ATTR_LATCH             | Fully decoded / used       |
 | R3    | 0x8C060    | Internal GAVDP ctrl    | Known written, unknown use |
 | R4    | 0x8C261              | Internal GAVDP ctrl    | Known written, unknown use |
