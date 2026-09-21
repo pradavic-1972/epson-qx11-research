@@ -1,1761 +1,768 @@
-# Epson QX-11 GAVDP (Video Processor) — Technical Documentation
+# Epson QX-11 / QC-11 GAVDP — Reverse Engineering Notes
 
-## 1. Introduction
+> **Updated:** 2026-09-21  
+> **Status:** based on repeatable real-hardware tests and QX-11 BIOS disassembly.
+>
+> When emulator behavior differs from the physical QX-11, **real hardware is the reference**.
 
-The **GAVDP** (“Graphics and Video Display Processor”) is the custom Epson video
-gate-array used in the **Epson QX-11 / QC-11** computer.  
-It replaces standard PC video adapters (CGA/MDA) with a fully memory-mapped,
-column-oriented graphics system capable of both text and high-resolution
-monochrome output.
+## 1. Overview
 
-This document describes:
+The GAVDP is the custom Epson video gate-array used by the QX-11 / QC-11 display subsystem.
 
-- The **VRAM architecture**  
-- The **11 GAVDP control registers** mapped inside VRAM  
-- The **scroll/erase engine**  
-- How the **BIOS uses GAVDP**  
-- How the **MAME driver must emulate it**  
-- The behaviors discovered through reverse engineering
+The most important result of the current reverse engineering is that the CPU does **not** see VRAM through one fixed layout. The same framebuffer can be exposed through two different CPU address organizations:
 
-This is the authoritative specification for the QX-11 GAVDP implementation.
+- **row-centric / scanline-major**
+- **column-centric / byte-column-major**
 
+The organization is selected by **bit 7 of the memory-mapped register at physical address `8D068h`**.
 
----
+The display origin is controlled separately by `C462h` and `C663h`.
 
-## 1.1 Overview of GAVDP functions
+The three registers currently understood best are:
 
-GAVDP provides:
+| Physical address | Current interpretation |
+|---|---|
+| `8D068h` | CPU VRAM organization + monitor/output profile |
+| `8C462h` | horizontal display origin + Mode-7 200-line half selector |
+| `8C663h` | vertical display origin |
 
-1. A 1-bit-per-pixel **column-centric bitmapped display**  
-2. A set of **hidden hardware registers stored inside VRAM**  
-3. Hardware-accelerated **scroll and clear operations**  
-4. A flexible **profile system** (40 vs 80 columns, mono vs color)  
-5. BIOS-controlled **mode and timing programming** via OEM INT 10h routines  
-6. Dynamic resolution switching (200-line vs 400-line modes)
-
-Unlike IBM PC video adapters, **all video access occurs through memory**, not I/O ports.  
-The CPU writes directly to the VRAM window; GAVDP interprets certain addresses as
-commands rather than pixel data.
-
+This document replaces earlier interpretations that described VRAM as permanently column-oriented, `C663` as a 25-row ring index, or `D068` as having a "bit 8 scroll mode".
 
 ---
 
-## 1.2 Architectural Diagram
+## 2. Common Pixel Packing
 
-            ┌───────────────────────────────┐
-            │            CPU 8088           │
-            └───────┬───────────────────────┘
-                    │ Memory-mapped access
-                    ▼
-    ┌────────────────────────────────────────────────┐
-    │                  GAVDP Gate-Array              │
-    │                                                │
-    │   • Column-oriented VRAM                       │
-    │   • Hardware scroll/erase                      │
-    │   • Attribute latch                            │
-    │   • Mode/profile logic                         │
-    │   • 11 internal registers (all in VRAM range)  │
-    └───────────┬────────────────────────────────────┘
-                │ reads pixel/attribute state
-                ▼
-         ┌────────────────────────┐
-         │  640×400 Monochrome    │
-         │      Display           │
-         └────────────────────────┘
+For the 640-pixel-wide modes:
+
+```text
+xbyte = x >> 3
+mask  = 80h >> (x & 7)
+```
+
+Each byte represents eight horizontal pixels, MSB first.
+
+What changes with `D068.7` is the relationship between `xbyte`, `y`, and the CPU-visible offset.
 
 ---
 
-## 1.3 What makes GAVDP unique
+## 3. D068 — CPU VRAM Organization
 
-GAVDP differs from ordinary PC graphics chips in several ways:
+### 3.1 Bit 7
 
-### **1. Column-centric VRAM layout**
-Screen data is stored vertically — each column is a contiguous block of memory.
-This drastically simplifies vertical scrolling and window shifting.
+Real-hardware testing establishes:
 
-### **2. VRAM contains control registers**
-Eleven special VRAM addresses behave as **hardware registers**. Writing to these
-locations updates GAVDP state, not pixels.
+```text
+D068.7 = 0 -> column-centric CPU VRAM organization
+D068.7 = 1 -> row-centric CPU VRAM organization
+```
 
-### **3. Hardware scroll engine**
-Instead of copying screen memory, GAVDP:
+The BIOS contains two complementary routines which do exactly this.
 
-- Maintains a **ring buffer row index** (`SCROLL_IDX`)  
-- Accepts **scroll/erase commands** when `MODE_FLAGS.bit8 = 1`  
-- Recomputes the mapping of logical → physical rows internally
+Conceptually:
 
-This is the key reason the QX-11 scrolls quickly.
+```text
+ROW routine:
+    load row-oriented segment table
+    profile |= 80h
+    D068 = profile
 
-### **4. Dynamic resolution**
-The BIOS changes the max X/Y variables in RAM; GAVDP reads them and updates the
-active resolution on the fly — including switching between 200-line and 400-line modes.
+COLUMN routine:
+    load column-oriented segment table
+    profile &= 7Fh
+    D068 = profile
+```
 
-### **5. BIOS performs video programming**
-The BIOS contains:
+The state is persistent. The BIOS does not automatically restore one universal "default" after every service.
 
-- CRTC timing tables  
-- Mode-specific 11-byte parameter blocks  
-- OEM INT 10h functions to push settings into GAVDP  
-- Custom text output routines that generate monochrome bit patterns
+A useful way to describe the BIOS behavior is:
 
+```text
+mode set / pixels / clears / scrolling -> row-centric
+characters / software cursor           -> column-centric
+```
 
----
+### 3.2 Row-centric formula
 
-## 1.4 GAVDP Design Goals (Based on Observed Behavior)
+With `D068.7 = 1`:
 
-Although no official documentation is known to exist, reverse engineering shows
-that GAVDP was designed to:
+```text
+offset = y * 0100h + xbyte
+```
 
-- Provide **fast, flicker-free scrolling** for business applications  
-- Blend **PC-compatible BIOS services** with Epson’s proprietary display hardware  
-- Support both **English** and **Japanese** ROM fonts  
-- Allow **firmware-controlled switching** between visual profiles  
-- Provide a **high-resolution text mode** superior to CGA
+Bytes across a scanline are consecutive.
 
-The behavior of the BIOS and the consistency of all artifacts confirm these
-design goals.
+This is naturally efficient for:
 
+- horizontal lines
+- scanline fills
+- rectangular clears
+- horizontal spans
+- row-oriented bitmap transfers
 
----
+### 3.3 Column-centric formula
 
-## 1.5 Document structure
+With `D068.7 = 0`:
 
-This document is organized as follows:
+```text
+offset = xbyte * 0200h + y
+```
 
-1. **Overview** (this section)  
-2. **VRAM Architecture & Mode 7 Layout**  
-3. **GAVDP Register Map (All 11 Registers)**  
-4. **Scroll/Erase Engine & SCROLL_IDX**  
-5. **MODE_FLAGS Profile Bits**  
-6. **ATTR_LATCH & Character Rendering**  
-7. **BIOS Interaction**  
-8. **MAME Implementation Notes**  
-9. **Open Questions**  
-10. **Summary of Hardware Model**  
+for a 200-line half.
 
-Each section can be read independently but is designed to build toward a full
-hardware model of the Epson QX-11 GAVDP subsystem.
+This is naturally efficient for:
 
-## 2. VRAM Architecture
-
-GAVDP exposes its video memory as a linear, memory-mapped VRAM window in the
-8088 physical address space. All rendering, scrolling, text output, and graphics
-draw operations occur through ordinary memory writes; no I/O ports are used for
-video.
-
-The VRAM layout is column-centric, not row-centric. This is the key architectural
-difference between the QX-11 and PC-compatible display hardware.
-
+- character glyph rendering
+- vertical stems and lines
+- byte-column-oriented sprites
+- the BIOS software cursor
 
 ---
 
-## 2.1 VRAM organized by vertical columns
+## 4. D068 Lower Bits — Monitor / Output Profile
 
-Each visible character column on the screen corresponds to one VRAM “column”,
-and each column contains the entire vertical pixel data for that screen column.
+The BIOS does not use only bit 7.
 
-Per column:
+During mode setup it derives the lower profile from the monitor DIP-switch configuration.
 
-- 400 pixel rows
-- 1 bit per pixel
-- Stored as two halves (top + bottom), 256 bytes each
+The four values used by the BIOS are:
 
-So, for each column:
+```text
+DIP index 00 -> 05h
+DIP index 01 -> 02h
+DIP index 10 -> 07h
+DIP index 11 -> 03h
+```
 
-- Offset 0x000–0x0FF : rows 0–199 (top half)
-- Offset 0x100–0x1FF : rows 200–399 (bottom half)
+The monochrome configuration uses:
 
-Total per column:
+```text
+02h
+```
 
-- 0x200 bytes (512 bytes)
+The other three values correspond to the three color/output configurations selected by the monitor DIP switches.
 
-In 80-column text mode:
+Current safe interpretation:
 
-- 80 columns × 0x200 bytes = 0xA000 bytes (40 KiB) of “visible” VRAM
+| D068 bits | Meaning |
+|---|---|
+| bit 7 | CPU VRAM organization |
+| bits 6..3 | not set by the BIOS paths analyzed so far; unknown/reserved |
+| bits 2..0 | monitor/output profile |
 
-In practice, VRAM is larger than 40 KiB. There are additional, non-visible
-columns beyond the main 80 columns used for:
+The individual electrical meaning of bits 0..2 is **not yet fully decoded**.
 
-- Hidden attributes
-- Scroll-related bookkeeping
-- Hardware registers
-- Temporary buffers
-- Other internal GAVDP state
+Software should preserve the lower profile bits when changing only the VRAM organization:
 
-These extra columns never appear directly on the screen.
+```text
+row state    = current_profile | 80h
+column state = current_profile & 7Fh
+```
 
+For the monochrome profile:
 
----
-
-## 2.2 Pixel addressing formula
-
-To compute where a pixel (x, y) is stored inside VRAM in the high-resolution
-mode (mode 7):
-
-- x: 0..639 (horizontal pixel)
-- y: 0..399 (vertical pixel)
-
-We derive:
-
-- column   = x / 8               ; which 8-pixel group horizontally
-- bit      = 7 - (x & 7)         ; MSB-first within that byte
-- half     = (y >= 200)          ; 0 = upper half, 1 = lower half
-- row      = y & 0xFF            ; 0–199 within the half
-- offset   = row + (half ? 0x100 : 0)
-- vram_index = column * 0x200 + offset
-
-The MAME `screen_update` function should use this formula to fetch the byte,
-then read bit `bit` as the pixel value (0 or 1).
-
+```text
+column = 02h
+row    = 82h
+```
 
 ---
 
-## 2.3 Mode 7 — high-resolution monochrome (640×400)
+## 5. Mode 7 — 640×400 Monochrome
 
-Mode 7 is GAVDP’s main high-resolution bitmap mode and is central to QX-11
-operation.
+Mode 7 uses two physical 200-line halves.
 
-Characteristics:
+The CPU segment alias for the lower half changes with `D068.7`.
 
-- Resolution: 640 × 400 pixels
-- Bit depth: 1 bit per pixel (monochrome)
-- Packing: 8 horizontal pixels per byte
-- Organization: column-centric as described above
+### 5.1 Column-centric Mode 7
 
-All higher-level text and graphics in this mode are ultimately encoded as this
-1 bpp bitmap, using the column and offset rules from section 2.2.
+With:
 
+```text
+D068.7 = 0
+```
 
----
+the hardware-confirmed mapping is:
 
-## 2.4 Why the column layout matters
+```text
+Y = 0..199
+    segment = 8000h
+    offset  = (X >> 3) * 0200h + Y
 
-On typical PC hardware (CGA/MDA/EGA/VGA), the VRAM layout is row-centric:
-contiguous bytes follow scanlines, not columns. Scrolling a text window usually
-means copying large blocks of memory or reprogramming CRTC start addresses.
+Y = 200..399
+    segment = 8010h
+    offset  = (X >> 3) * 0200h + (Y - 200)
 
-On the QX-11:
+mask = 80h >> (X & 7)
+```
 
-- The screen is implemented as a logical ring buffer of rows
-- A single register (`SCROLL_IDX`) defines which VRAM row corresponds to the
-  top of the visible window
-- Scroll operations often involve just updating that index and performing some
-  targeted clear operations, not bulk copying
+### 5.2 Row-centric Mode 7
 
-This design allows very fast vertical scrolling on an 8088 CPU.
+With:
 
+```text
+D068.7 = 1
+```
 
----
+the mapping is:
 
-## 2.5 VRAM contains GAVDP registers
+```text
+Y = 0..199
+    segment = 8000h
+    offset  = Y * 0100h + (X >> 3)
 
-Within the VRAM range there are 11 special addresses that do not represent
-pixel data. Writes to these locations update GAVDP state instead of changing
-the bitmap.
+Y = 200..399
+    segment = 9000h
+    offset  = (Y - 200) * 0100h + (X >> 3)
 
-Examples:
+mask = 80h >> (X & 7)
+```
 
-- A scroll index used for the logical top-of-screen
-- Mode flags controlling profiles and scroll/erase behavior
-- A latch for current character attributes (intensity, color, reverse, etc.)
+Important:
 
-These addresses typically fall into the extra, non-visible columns beyond the
-main 80 text columns and are treated specially by the emulator.
+```text
+upper half remains 8000h
+lower half:
+    column view -> 8010h
+    row view    -> 9000h
+```
 
+The `9000h` lower-half behavior in the row-oriented state has been observed on real hardware and is also consistent with the BIOS Mode-7 pixel path.
 
----
+### 5.3 Mode-7 summary
 
-## 2.6 Dynamic resolution and geometry
-
-The BIOS maintains RAM variables that describe:
-
-- Number of visible columns (40 or 80)
-- Number of visible text rows
-- Effective vertical resolution (200 vs 400 lines)
-- Timing parameters for the display
-
-When the BIOS changes video mode (via INT 10h AH=00 or OEM calls), it updates
-these variables. The GAVDP device must:
-
-- Notice when geometry-related variables change
-- Reconfigure the MAME `screen_device` to match the new resolution and aspect
-- Continue to interpret VRAM with the same column-centric rules
-
-As a result, the QX-11 can seamlessly switch between 40-column text, 80-column
-text, and graphics modes while still using the same underlying VRAM layout.
-
+| `D068.7` | CPU organization | Y=0..199 | Y=200..399 |
+|---|---|---:|---:|
+| `0` | column-centric | `8000h` | `8010h` |
+| `1` | row-centric | `8000h` | `9000h` |
 
 ---
 
-## 2.7 Summary of VRAM behavior
+## 6. Mode 6 — 640×200 Monochrome
 
-- VRAM is fully memory-mapped; no separate video I/O ports.
-- Pixels are stored in vertical columns: 0x200 bytes per column, 400 rows, 1 bpp.
-- Visible 80 columns use 40 KiB; additional hidden columns exist.
-- Some addresses in VRAM are special GAVDP registers, not pixels.
-- Scrolling leverages a ring-buffer orientation instead of copying lines.
-- Geometry (resolution, columns, rows) is controlled by BIOS variables and
-  communicated indirectly to GAVDP.
+Mode 6 is especially useful for direct monochrome software because combined/broadcast write apertures have been identified.
 
-The next section will describe the 11 GAVDP registers, including the known
-addresses and their roles.
+### 6.1 Column-centric Mode 6
 
-## 3. GAVDP Register Map (All 11 Registers)
+```text
+D068.7 = 0
 
-GAVDP exposes **11 special registers**, all of them located inside the VRAM
-address range.  
-Although they appear as memory, writes to these addresses are interpreted
-as **hardware commands or configuration changes**, not pixel writes.
+offset = (X >> 3) * 0200h + Y
+mask   = 80h >> (X & 7)
+```
 
-Only three registers are fully decoded today. The others are confirmed to
-exist because the BIOS writes to them, and they reside in the non-visible
-VRAM area reserved for GAVDP control.
+A real-hardware test confirmed the combined/broadcast write aperture:
 
-This section documents everything known so far.
+```text
+9010h
+```
 
+Writing the test image through `9010h` produced the complete visible monochrome result.
 
----
+### 6.2 Row-centric Mode 6
 
-## 3.1 Summary table of the 11 registers
+```text
+D068.7 = 1
 
-| Reg # | Physical Address | Name / Purpose         | Status                     |
-|-------|------------------|------------------------|----------------------------|
-| R0    | [0x8C663](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | VERT_SCROLL_IDX             | Fully decoded              |
-| R1    | [0x8D068](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)          | VRAM Organization             | Fully decoded (bit 8 critical) |
-| R2    | 0x8D269          | ATTR_LATCH             | Fully decoded / used       |
-| R3    | 0x8C060    | Internal GAVDP ctrl    | Known written, unknown use |
-| R4    | 0x8C261              | Internal GAVDP ctrl    | Known written, unknown use |
-| R5    | [0x8C462](QX11_GAVDP_D068_C462_C663_REVERSE_ENGINEERING.md)             | HORIZ_SCROLL_IDX   | Control Horizontal shift / VRAM index |
-| R6    | 0x8D46A          | Internal GAVDP ctrl    | Known written, unknown use |
-| R7    | 0x8C864              | Internal GAVDP ctrl    | Known written, unknown use |
-| R8    | 0x8CA65            | Internal GAVDP ctrl    | Known written, unknown use |
-| R9    | 0x8CC66            | Internal GAVDP ctrl    | Known written, unknown use |
-| R10   | 0x8CE67              | Internal GAVDP ctrl    | Known written, unknown use |
+offset = Y * 0100h + (X >> 3)
+mask   = 80h >> (X & 7)
+```
 
-Notes:
+The BIOS row-oriented individual plane aliases are:
 
-- All 11 registers reside in the VRAM mapping, but outside the visible
-  80-column region used for text and graphics.
+```text
+9000h
+8008h
+8000h
+```
 
-- The emulator should treat writes to unknown registers as **non-pixel events**
-  (log them, but do not modify the bitmap).
+The corresponding combined/broadcast aperture identified in the row-oriented diagnostic is:
 
+```text
+9008h
+```
+
+### 6.3 Combined-aperture caution
+
+The combined apertures are established as useful **write paths**.
+
+Do not assume that reads from `9010h` or `9008h` return the same value as an ordinary framebuffer plane until that behavior is separately verified.
+
+For read/modify/write operations, use a known readable aperture, modify the byte in the CPU, then write the result through the combined aperture if desired.
 
 ---
 
-## 3.2 Register R0 — SCROLL_IDX (0x8C663)
+## 7. C462 — Horizontal Origin and Mode-7 Half Select
 
-### Purpose
-`SCROLL_IDX` tracks the logical top row of the text window.
+`C462` is a display-origin register. It is independent of the CPU VRAM organization selected by `D068`.
 
-The QX-11 does **not** scroll by copying VRAM.  
-Instead, GAVDP:
+### 7.1 Bits 0..6 — horizontal origin
 
-- treats the 25 text rows as a ring buffer  
-- uses `SCROLL_IDX` as an offset into this ring  
-- computes logical → physical row mapping on the fly
+Real-hardware testing establishes:
 
-### Behavior
+```text
+C462[6:0] = horizontal byte-column origin
+```
 
-- Range: 0–24 (modulo 25)
-- When BIOS scrolls up by one line, it increments this register modulo 25.
-- When drawing characters, GAVDP adds this offset to determine which physical
-  row corresponds to logical row 0.
+One increment corresponds to one byte column:
 
-In the emulator:
+```text
+1 step = 8 pixels
+```
 
-- Updating `SCROLL_IDX` must immediately change the mapping from logical rows
-  to bitmap rows.
-- No pixel shifting occurs; only the origin changes.
+Increasing the value moves the displayed image left, with circular wrap behavior.
 
+### 7.2 Bit 7 — Mode-7 200-line half selector
 
----
+In Mode 7:
 
-## 3.3 Register R1 — MODE_FLAGS (0x8D068)
-
-### Purpose
-`MODE_FLAGS` controls:
-
-- The current **display profile** (40/80 columns, mono/color variants)
-- Whether GAVDP is in **scroll/erase mode** (bit 8)
-- Text/graphics behavioral modes
-- Possible palette/intensity properties
-
-### Known bitfields
-
-- **Bit 8 = Scroll/Erase Mode Enable**
-
-  When this bit = 1:
-  - GAVDP interprets subsequent VRAM writes as **commands** rather than pixels
-  - Used for full-screen clear
-  - Used for partial clears during scrolling
-  - Used for managing buffer transitions
-
-  When bit 8 = 0:
-  - VRAM writes behave normally (1-bpp pixel data)
-
-- **Bit 7**
-
-  Toggled by the BIOS during mode initialization.  
-  Likely indicates an internal state transition (e.g., latch reset, timing reload).
-
-- **Other bits**
-
-  Used by BIOS to select between:
-  - 40-column vs 80-column modes  
-  - Monochrome vs color profile  
-  - Alternate timing tables  
-
-The exact semantic meaning of all remaining bits is still under analysis.
-
-
----
-
-## 3.4 Register R2 — ATTR_LATCH (0x8D269)
-
-### Purpose
-`ATTR_LATCH` stores the **current text attribute** (foreground, background,
-intensity, reverse video, etc.).
-
-Every time the BIOS draws a character through its OEM INT 10h routines:
-
-1. The attribute value in this register is sampled by GAVDP.
-2. The bitmapped font rendering uses this attribute to determine which pixels
-   to set (1) or clear (0).
-
-### Observed behavior
-
-- When the BIOS sets attribute 0x97 (white on black), characters render normally.
-- Inverse video regions appear when bits in this register switch foreground/background.
-- Highlighted menu bars in SETUP rely on value changes in this register.
-
-In the emulator:
-
-- Changing `ATTR_LATCH` updates the internal attribute state.
-- Rendering must read this state for every character drawn.
-- Rendering varies based on the selected profile (mono vs color defaults).
-
-
----
-
-## 3.5 Registers R3–R10 — Undocumented but active
-
-The BIOS writes to at least eight more VRAM-mapped control registers during:
-
-- POST  
-- Mode initialization  
-- Window clearing  
-- Switching between 40 and 80 column modes  
-- Cursor state changes  
-
-These registers likely control:
-
-- Timing parameters  
-- Row/column clipping  
-- CRTC equivalencies  
-- Cursor blink intervals  
-- The internal scroll/erase engine  
-- Special interaction with the GAVNIO gate-array  
-
-### Emulator guidance
-
-Until decoded:
-
-- Log each write with address and value
-- Do **not** treat these as pixel writes
-- Store their last written value for future use
-- Avoid making assumptions until we determine functional roles
-
-
----
-
-## 3.6 Handling the registers in the emulator
-
-When the emulator receives a write at one of the known register addresses:
-
-- `R0 (SCROLL_IDX)` → update row origin immediately  
-- `R1 (MODE_FLAGS)` → modify scroll mode and profile  
-- `R2 (ATTR_LATCH)` → update attribute state  
-- Unknown R3–R10 → store/log value, ignore pixel effects  
-
-Key rule:  
-**No register write should ever modify visible bitmap data directly.**  
-Bitmap updates only occur when the CPU writes to visible VRAM columns with
-scroll/erase mode disabled.
-
-
----
-
-## 3.7 Summary of register behaviors
-
-- 11 registers exist; 3 are fully implemented.
-- All registers live in VRAM space but behave as control words.
-- SCROLL_IDX implements the QX-11's vertical ring buffer.
-- MODE_FLAGS controls profiles + scroll/erase mode.
-- ATTR_LATCH determines how text glyphs are drawn.
-- R3–R10 exist and matter, but require further reverse engineering.
-
-The next section focuses on **scroll/erase behavior**, which is central to the
-QX-11 display system.
-## 4. Scroll/Erase Engine — SCROLL_IDX, MODE_FLAGS.bit8, and D462
-
-The QX-11 does **not** scroll screen contents by copying VRAM.  
-Instead, GAVDP implements a **hardware scroll/erase engine** that operates through:
-
-- The ring-buffer row index (`SCROLL_IDX`)
-- The scroll/erase mode bit (`MODE_FLAGS.bit8`)
-- An additional VRAM location (`D462`) used as a scroll reference or boundary
-
-This mechanism is essential for reproducing correct QX-11 behavior.
-
-
----
-
-## 4.1 SCROLL_IDX — the ring buffer origin
-
-From Section 3, `SCROLL_IDX` defines the logical top row of the screen:
-
-- Logical row 0 → points to physical row `SCROLL_IDX`
-- Logical row 1 → points to `(SCROLL_IDX + 1) mod 25`
-- …
-- Logical row 24 → points to `(SCROLL_IDX + 24) mod 25`
-
-This is why scrolling upward by one line does **not** require rewriting the
-entire text area.
-
-The emulator must treat this register as an immediate state-change, not a bitmap
-operation.
-
-
----
-
-## 4.2 D462 — scroll reference / clear boundary
-
-At VRAM physical address **0x8D462**, the BIOS writes a value during every scroll
-operation.
-
-Based on logs and behavior:
-
-- D462 appears to encode the **target row** or **reset row** used when clearing
-  the line newly entering the window after a scroll.
-- It is always written *while scroll/erase mode is active*.
-- The exact details remain partially undocumented, but the pattern is:
-
-  1. BIOS enters scroll/erase mode (MODE_FLAGS.bit8 = 1)  
-  2. BIOS updates SCROLL_IDX  
-  3. BIOS writes to D462  
-  4. BIOS performs a sequence of VRAM writes that trigger erase/clear behavior  
-  5. BIOS exits scroll/erase mode (MODE_FLAGS.bit8 = 0)
-
-The emulator should **capture** the value written to D462 and make it available
-to the scroll engine, even if full semantics are not yet decoded.
-
-
----
-
-## 4.3 MODE_FLAGS.bit8 — enabling the scroll/erase engine
-
-`MODE_FLAGS` contains a critical bit:
-
-- **Bit 8 = Scroll/Erase Mode Enable**
-
-When **bit 8 = 1**, VRAM writes are **not pixel writes**.  
-Instead, they are interpreted as **commands** to the GAVDP scroll engine.
-
-### Effects in scroll/erase mode:
-
-- Writes in the text area clear rows rather than store bitmap data.
-- Writes to D462 and adjacent fields cause region-specific blanking.
-- Writes may increment or synchronize internal pointers.
-
-### Effects when bit 8 goes back to 0:
-
-- VRAM writes resume normal 1-bpp behavior.
-- The newly exposed line is now clean and ready for rendering characters.
-- SCROLL_IDX now points to the correct new origin row.
-
-
----
-
-## 4.4 The scroll sequence (as observed from BIOS logs)
-
-A typical upward scroll initiated by the BIOS follows this pattern:
-
-1. **Enable scroll mode**  
-   MODE_FLAGS |= 0x0100
-
-2. **Update ring buffer index**  
-
-3. **Store reference value in D462**  
-(Exact meaning still under study)
-
-4. **Perform a series of VRAM writes**  
-These writes do *not* store pixels — they clear or reset the relevant rows.
-
-5. **Disable scroll mode**  
-
-
-6. **BIOS draws characters into the newly exposed bottom line**  
-Now that the scroll/erase engine has cleared it.
-
-
----
-
-## 4.5 Why scroll/erase mode is mandatory for correct emulation
-
-If scrolls are implemented by copying VRAM (PC-style):
-
-- A “gap” appears in the output (as we observed early in development).
-- The cursor jumps inconsistently.
-- Clearing the new bottom line appears delayed or corrupt.
-- Some BIOS applications fail to repaint correctly.
-
-Once scroll/erase mode was implemented:
-
-- Scrolling became perfectly smooth.
-- SETUP menus and DOS prompts behaved like the real machine.
-- The system stopped producing visual gaps.
-
-
----
-
-## 4.6 Emulator responsibilities for scroll/erase behavior
-
-The emulator must implement:
-
-- A boolean state indicating whether scroll/erase mode is active.
-- A callback on writes to SCROLL_IDX, MODE_FLAGS, and D462.
-- A special handler for VRAM writes made while scroll/erase mode is active.
-
-### The scroll handler should:
-
-- Clear rows indicated by SCROLL_IDX and D462.
-- Avoid modifying pixels directly unless scroll mode is OFF.
-- Ensure that the newly exposed row is blanked.
-
-### The pixel write handler should:
-
-- Treat VRAM normally when scroll mode = 0.
-- Treat VRAM writes as clear operations when scroll mode = 1.
-
-
----
-
-## 4.7 Summary of scroll/erase engine
-
-- **SCROLL_IDX** selects the new top row.
-- **D462** provides a reference point for the row to clear.
-- **MODE_FLAGS.bit8** enables special semantics for write operations.
-- The BIOS relies on this mechanism heavily.
-- Implementing this correctly is mandatory for accurate QX-11 emulation.
-
-The next section details **MODE_FLAGS** in depth, covering profile selection,
-display geometry, and mode transition behavior.
-
-
-GAVDP intercepts this write and updates its internal state accordingly.
-
-### Known bits:
-
-| Bit | Meaning                         | Status |
-|-----|----------------------------------|---------|
-| 8   | Scroll/Erase Mode Enable         | Fully decoded |
-| 7   | Mode-latch / reinitialization    | Observed, partially decoded |
-| 0–6 | Profile/timing selection         | Known to affect video geometry |
-| 9–15| Unknown                          | Believed to control timing and profile variants |
-
-Because MODE_FLAGS contains both programmable bits and internal hardware state,
-only some settings correspond to meaningful BIOS operations.
-
-
----
-
-## 5.2 Bit 8 — Scroll/Erase Mode Enable
-
-This bit is **mandatory** for scroll and clear operations.
-
-When **bit 8 = 1**:
-
-- VRAM writes become **scroll/erase commands**.
-- GAVDP clears or resets rows rather than drawing pixels.
-- Registers such as D462 become meaningful inputs.
-
-When **bit 8 = 0**:
-
-- VRAM writes behave normally (1 bpp pixel writes).
-
-This bit alone differentiates between:
-
-- Regular rendering  
-- Scroll/erase sequences  
-- Full-screen clearing  
-
-
----
-
-## 5.3 Bit 7 — Mode change / latch reset
-
-The BIOS toggles **bit 7** during INT 10h mode initialization.  
-Observed roles include:
-
-- Resetting internal counters or lookup tables  
-- Forcing GAVDP to reload its equivalent of a CRTC timing latch  
-- Used between 40↔80 column transitions  
-- Required to re-establish correct vertical timing
-
-Even though the exact function is unknown, the emulator should:
-
-- Record changes to this bit
-- Re-evaluate geometry when bit 7 toggles
-
-
----
-
-## 5.4 Profile selection via low bits (0–6)
-
-The BIOS uses certain low-bit patterns to select display profiles:
-
-- **Mono-like profile**  
-  White-on-black defaults, 80-column text emphasis.
-
-- **Color-like profile**  
-  Allows reverse video, intensity variations; used even though QX-11 has a mono display.
-
-- **Mixed profile**  
-  Used when DIP switches request nonstandard behavior.
-
-Each BIOS video mode (0–7) corresponds to a different profile-mediate
-interpretation of:
-
-- Character pitch  
-- Line height  
-- Attribute semantics  
-- Palette mapping (monochrome intensity mapping)  
-- Visible column scaling
-
-
-Although the bit-level meanings are still not fully decoded, the emulator achieves
-correct behavior by:
-
-- Watching for any MODE_FLAGS change while in BIOS mode initialization  
-- Recomputing display geometry  
-- Updating palette intensity rules for text mode
-
-
----
-
-## 5.5 MODE_FLAGS controls geometry (40 vs 80 columns)
-
-The BIOS determines whether to use 40 or 80 columns based on:
-
-- Video mode  
-- DIP switch settings  
-- MODE_FLAGS profile bits
-
-When switching:
-
-- Character pitch changes  
-- Active visible columns change  
-- Horizontal timing changes  
-- VRAM scan mapping remains the same (column-centric)
-
-The emulator must reconfigure the MAME `screen_device` after each MODE_FLAGS
-update that changes columns or vertical resolution.
-
-
----
-
-## 5.6 MODE_FLAGS controls vertical resolution (200 vs 400)
-
-Mode 7 uses 400 pixel rows.  
-Text modes may use:
-
-- 200 lines (double-scan collapsed)  
-- 400 lines (true high-res text)
-
-MODE_FLAGS bit patterns select which interpretation GAVDP uses.
-
-The BIOS:
-
-1. Writes a timing block (11 bytes) into RAM  
-2. Calls an OEM routine that programs these values into GAVDP  
-3. Sets MODE_FLAGS appropriately  
-
-Thus, GAVDP must be able to switch resolutions dynamically without reloading VRAM.
-
-
----
-
-## 5.7 Emulator responsibilities for MODE_FLAGS
-
-The emulator should perform:
-
-- **On write**:
-  - Update MODE_FLAGS internal state
-  - Check bit 8 → enable/disable scroll mode
-  - Check bit 7 → possible reinitialization state
-  - Monitor low bits → evaluate geometry/profile changes
-
-- **On geometry change**:
-  - Update columns, rows, visible area
-  - Reconfigure the active screen device
-  - Update any character cell metrics
-
-- **During rendering**:
-  - Apply the correct intensity/palette rules based on profile bits
-
-Any incorrect interpretation of MODE_FLAGS results in:
-
-- Misaligned text  
-- Stretched/incorrect resolution  
-- Broken scrolling  
-- Wrong colors/intensities  
-- Incorrect cursor placement  
-
-
----
-
-## 5.8 Summary of MODE_FLAGS behavior
-
-- MODE_FLAGS drives almost all aspects of GAVDP behavior.
-- Bit 8 enables scroll/erase mode (critical).
-- Bit 7 handles internal state resets (used during mode changes).
-- Low bits select among several display profiles.
-- The BIOS writes MODE_FLAGS repeatedly during mode initialization.
-- Correct emulation requires responding immediately to changes.
-
-The next section covers **ATTR_LATCH**, which determines how character glyphs
-are rendered in text modes.
-
-## 6. ATTR_LATCH — Text Attribute Register and Rendering Pipeline
-
-`ATTR_LATCH` (physical VRAM address **0x8D269**) stores the **active text
-attribute** used by GAVDP when drawing characters.  
-Unlike PC CGA/MDA hardware, the QX-11 renders text by drawing **bitmap glyphs
-directly into the 1-bpp screen**, and `ATTR_LATCH` influences how those glyphs
-are converted into pixels.
-
-This register is critical to:
-
-- Foreground/background selection  
-- Intensity and reverse-video behavior  
-- Menu highlighting in SETUP  
-- BIOS-rendered text cursor behavior  
-
-
----
-
-## 6.1 When ATTR_LATCH is sampled
-
-Whenever the BIOS draws a character using INT 10h AH=0Eh (TTY output):
-
-1. BIOS calls its **OEM text renderer** (not the IBM one)
-2. The renderer fetches the 8×16 glyph from the BIOS ROM
-3. GAVDP **samples** the current ATTR_LATCH value
-4. The glyph is drawn into VRAM using attribute-dependent rules
-
-Thus:
-
-- Changing ATTR_LATCH affects *future* characters
-- It does **not** retroactively change characters already drawn
-
-
----
-
-## 6.2 What ATTR_LATCH controls (on real hardware)
-
-From reverse engineering and emulator tests:
-
-### Foreground/Background
-Bits correspond to:
-
-- Normal monochrome  
-- Reverse video (swap 1 ↔ 0)  
-- Highlighted text (SETUP menu bars)  
-
-### Intensity
-Some bits cause pixels to brighten or darken based on the selected profile.
-Since the QX-11 has a monochrome CRT, GAVDP implements intensities in its
-1-bpp pipeline by:
-
-- Rendering some pixels as ON or OFF depending on lookup
-- Interpreting attribute bits as “bright/invert/muted” instructions
-
-### Reserved modes
-Unknown bits may control:
-
-- Underline  
-- Blink  
-- Double-height text  
-- Alternate Japanese glyph tables (QC-11 only)
-
-Although these features are not used by standard QX-11 software, the emulator
-should preserve unknown bits for future exploration.
-
-
----
-
-## 6.3 How the attribute affects bitmap drawing
-
-The QX-11 draws characters by **copying glyph rows directly into the 1-bpp VRAM**.
-
-For each bit in the glyph:
-
-- If the glyph bit = 1 → foreground pixel  
-- If the glyph bit = 0 → background pixel  
-
-`ATTR_LATCH` determines what “foreground” and “background” mean.
-
-Examples:
-
-### Normal text (0x70 or similar)
-Foreground = pixel ON  
-Background = pixel OFF  
-
-### Reverse video
-Foreground = pixel OFF  
-Background = pixel ON  
-
-### Highlight
-Foreground = ON, but BIOS writes attribute values that modify intensity and
-background for menu bars.
-
-In the emulator, this requires:
-
-- A function that interprets ATTR_LATCH → effective foreground/background pixel
-- Applying that mapping while copying glyph bits into VRAM
-
-
----
-
-## 6.4 Interaction with MODE_FLAGS profiles
-
-`MODE_FLAGS` selects the display profile.  
-`ATTR_LATCH` selects per-character attributes.
-
-Together:
-
-- MODE_FLAGS defines **global rules** (e.g., mono vs pseudo-color defaults)  
-- ATTR_LATCH defines **per-character overrides**  
-
-Thus, a glyph may appear:
-
-- Normal  
-- Dim  
-- Bright  
-- Reversed  
-- Highlighted  
-
-Depending on the combination of these two registers.
-
-
----
-
-## 6.5 How the BIOS uses ATTR_LATCH
-
-The BIOS sets this register:
-
-- Before drawing headers in SETUP  
-- Before drawing highlighted menu selections  
-- Before drawing normal text  
-- Before updating the cursor position  
-
-Examples from logs:
-
-- SETUP blue bars → BIOS writes distinct attribute values before printing  
-- DOS prompt rendering → BIOS sets “normal” attribute then prints characters  
-- Cursor line clearing → BIOS sets attribute then calls scroll/erase sequences  
-
-This behavior is consistent with a PC-like attribute pipeline, except applied to a
-1-bpp display instead of a 4-bit CGA palette.
-
-
----
-
-## 6.6 Emulator responsibilities for ATTR_LATCH
-
-The emulator must:
-
-- Track the last written value to ATTR_LATCH  
-- Interpret it to choose foreground/background when drawing glyphs  
-- Combine it with MODE_FLAGS when applying global visual rules  
-- Ensure that attribute changes affect **subsequent** characters, not previous ones  
-- Avoid modifying already drawn VRAM pixels when ATTR_LATCH changes  
-
-Incorrect handling leads to:
-
-- Wrong inverse video behavior  
-- Incorrect menu highlighting  
-- Miscolored or inverted characters  
-- Broken DOS and SETUP rendering  
-
-
----
-
-## 6.7 Summary
-
-- ATTR_LATCH is a VRAM-mapped register controlling character attributes  
-- Sampled during each glyph rendering operation  
-- Works together with MODE_FLAGS to determine final pixel output  
-- Critical for correct rendering of menus, prompts, and system messages  
-- Must be applied on a per-character basis in the emulator  
-
-The next section describes **how the BIOS programs GAVDP** using INT 10h and OEM routines.
-## 7. BIOS Interaction With GAVDP (INT 10h, OEM Routines, Mode Setup)
-
-The BIOS plays a central role in configuring GAVDP.  
-Unlike IBM PC systems, where video adapters contain their own CRTC registers and
-hardware sequencing, the QX-11 BIOS performs nearly all mode initialization
-manually, then writes key parameters into GAVDP’s VRAM-mapped registers.
-
-This section explains how the BIOS:
-
-- Sets video modes  
-- Loads timing blocks  
-- Programs GAVDP’s internal state  
-- Draws characters  
-- Performs scrolling and clearing  
-
-
----
-
-## 7.1 INT 10h, AH=00 — Set Video Mode (QX-11 version)
-
-On a standard PC, INT 10h AH=00 sets a CGA/MDA mode and initializes registers.
-
-On the QX-11, the routine is **vastly more complex**:
-
-### Steps performed:
-
-1. **Interpret requested video mode (0–7)**  
-   - Determine text vs graphics  
-   - Determine 40 vs 80 columns  
-   - Determine default attribute settings  
-
-2. **Read DIP switches**  
-   These affect:
-   - Default monochrome vs color profile  
-   - Cursor type  
-   - Character height  
-
-3. **Select a display profile**  
-   This updates bits in `MODE_FLAGS`.
-
-4. **Load an 11-byte timing block**  
-   Stored in BIOS ROM at:
-    CS:4A78 + (mode * 11)
-The timing block is copied into RAM at `[0808]`.
-
-5. **Optionally load 4 more bytes of timing overrides**  
-Used for modes where character height changes.
-
-6. **Call an OEM routine**  
-This routine writes timing/geometry parameters into GAVDP’s internal
-registers (not memory-mapped, not visible to the CPU).
-
-7. **Initialize SCROLL_IDX, ATTR_LATCH, and related variables**  
-The variables controlling geometry and cursor shape are also updated.
-
-8. **Clear the screen using scroll-erase mode**  
-- Enable MODE_FLAGS.bit8  
-- Issue VRAM writes interpreted as clear commands  
-- Disable MODE_FLAGS.bit8  
-
-9. **Restore the cursor and exit**
-
-This entire sequence is necessary to change mode correctly.
-
-
----
-
-## 7.2 OEM BIOS routines for GAVDP configuration
-
-While the IBM PC delegates CRTC setup to hardware, Epson systems rely on BIOS
-routines that:
-
-- Copy mode timing blocks  
-- Write GAVDP control words  
-- Reset or toggle internal state bits  
-- Call helper routines at fixed BIOS addresses
-
-These routines:
-
-- Are unique to the QX-11/QC-11  
-- Provide the only method for accessing GAVDP’s internal timing registers  
-- Must be understood and emulated to correctly reproduce vertical height,
-horizontal width, and borders  
-
-
----
-
-## 7.3 INT 10h, AH=0Eh — Character Output
-
-This TTY output function is **not** IBM-compatible on the QX-11.
-
-The sequence is:
-
-1. BIOS fetches glyph from embedded ROM tables  
-2. GAVDP samples ATTR_LATCH  
-3. BIOS computes VRAM locations using column-centric formula  
-4. BIOS writes pixels directly (scroll mode must be OFF)  
-5. If the character is newline, the BIOS:  
-- Updates SCROLL_IDX  
-- Engages scroll/erase mode  
-- Clears the new bottom row  
-- Writes cursor position variables  
-
-Character output therefore depends heavily on the GAVDP attribute latch,
-scrolling engine, and VRAM layout.
-
-
----
-
-## 7.4 Screen clearing (full CLS)
-
-The BIOS uses scroll-erase mode (MODE_FLAGS.bit8 = 1) for:
-
-- Full-screen clear  
-- Partial clear (e.g., menu redraw)  
-- Preparing the screen for new cursor position
-
-The sequence:
-
-1. Enable scroll/erase mode  
-2. Write into VRAM addresses interpreted as erase commands  
-3. Disable scroll/erase mode  
-
-The emulator must **not render any pixels** during this sequence.  
-The effect is equivalent to `memset(0)` on the visible VRAM rows.
-
-
----
-
-## 7.5 Interrupt handlers (INT 70h–75h)
-
-Although these relate more to GAVNIO/GAVNIT behavior, the BIOS interrupt system
-has interactions with video operations:
-
-- **INT 75h** is fired when keyboard bytes arrive.  
-BIOS updates cursor in response.
-
-- **INT 70h** occurs when powering off or using BIOS shutdown services.  
-Some routines update video state before halting output.
-
-- **INT 71h** uses ports 0/1 (GAVDP timer) for keyboard autorepeat and cursor blink.
-
-While GAVDP does not implement these interrupts directly, video behavior depends
-on the BIOS handling of these events.
-
-
----
-
-## 7.6 Mode transitions and why they are delicate
-
-Incorrect emulation of mode transitions leads to:
-
-- Wrong character height  
-- Incorrect aspect ratio  
-- Misaligned glyphs  
-- Incorrect top/bottom borders  
-- Wrong number of visible lines  
-- Incorrect scroll behavior  
-
-Thus, when the emulator receives a MODE_FLAGS write during a BIOS mode change:
-
-- Re-evaluate geometry immediately  
-- Reload or recompute mode-dependent variables  
-- Ensure SCROLL_IDX resets if needed  
-- Do not trust VRAM contents until scroll-erase completes  
-
-
----
-
-## 7.7 Why BIOS interaction is the key to accurate emulation
-
-GAVDP’s internal hardware registers are:
-
-- **Not memory-mapped**
-- **Not readable**
-- **Not directly accessible by the 8088**
-
-Only the BIOS knows how to program them.
+```text
+C462.7 = 0 -> upper 200-line half is displayed first
+C462.7 = 1 -> lower 200-line half is displayed first
+```
 
 Therefore:
 
-- Correct emulation requires matching BIOS behavior, not generic hardware assumptions.
-- Mode changes must honor the BIOS timing tables.
-- Cursor and text functions must respect the BIOS attribute and rendering rules.
+```text
+C462 = 00h:
+    upper half
+    lower half
 
-The emulator should be built around the principle:
+C462 = 80h:
+    lower half
+    upper half
+```
 
-### “BIOS behavior defines the hardware.”
+This half swap is confirmed on real hardware.
 
-
----
-
-## 7.8 Summary
-
-- The BIOS configures GAVDP using a complex mode-setting sequence.
-- Timing blocks stored in ROM define geometry and sync rules.
-- Scroll/erase mode is used for all clearing operations.
-- INT 10h AH=0Eh is a custom text renderer using bitmap glyphs.
-- All display-related interrupts are tightly integrated with BIOS logic.
-
-The next section details the **MAME emulation strategies** required for accurate reproduction of GAVDP.
-## 8. MAME Device Implementation Notes
-
-This section explains how the emulator should model GAVDP, based on observed
-hardware behavior, BIOS interactions, and reverse engineering results.
-
-The GAVDP device inside the QX-11 MAME driver is responsible for:
-
-- Implementing the 1-bpp **column-based VRAM layout**
-- Handling **register writes** mapped inside VRAM
-- Processing **scroll/erase mode**
-- Rendering the final **bitmap** for the screen device
-- Reacting to BIOS mode changes (geometry, profile, resolution)
-- Supporting dynamic switching between text and graphics modes
-
+The BIOS also explicitly uses `C462.7` this way when a Mode-7 logical vertical origin crosses the 200-line boundary.
 
 ---
 
-## 8.1 Core responsibilities of the GAVDP device
+## 8. C663 — Vertical Display Origin
 
-The device must implement:
+Real-hardware testing establishes:
 
-1. A **memory region** representing VRAM  
-2. Intercepting writes to VRAM that fall into register ranges  
-3. Normal VRAM pixel writes when scroll mode = 0  
-4. Scroll/erase semantics when scroll mode = 1  
-5. A `screen_update()` method that reads VRAM and draws pixels  
-6. Geometry switching based on BIOS-written variables  
-7. Attribute-based glyph rendering control
+```text
+1 C663 step = 1 scanline
+```
 
+Increasing `C663` moves the displayed image upward.
 
----
+For Mode 7 the BIOS represents a logical 0..399 vertical origin as:
 
-## 8.2 VRAM memory map and write interception
+```text
+if origin < 200:
+    C462.7 = 0
+    C663   = origin
+else:
+    C462.7 = 1
+    C663   = origin - 200
+```
 
-GAVDP exposes its VRAM at fixed addresses within the QX-11 memory map.
+Examples:
 
-The emulator must:
+```text
+origin   0 -> C462.7=0, C663=00h
+origin 199 -> C462.7=0, C663=C7h
+origin 200 -> C462.7=1, C663=00h
+origin 399 -> C462.7=1, C663=C7h
+```
 
-- Allow normal CPU reads/writes to the **visible VRAM area**.
-- Detect writes to **SCROLL_IDX (0x8C663)**  
-- Detect writes to **MODE_FLAGS (0x8D068)**  
-- Detect writes to **ATTR_LATCH (0x8D269)**  
-- Identify future R3–R10 regions and log their writes.
+Thus the 400-line Mode-7 vertical origin is split between:
 
-### Rules:
-
-- **If scroll/erase mode = 0** → write pixel bits normally into VRAM  
-- **If scroll/erase mode = 1** → do NOT write pixel data; treat writes as commands  
-
-
----
-
-## 8.3 Implementing MODE_FLAGS
-
-On writes to MODE_FLAGS:
-
-1. Update internal `m_mode_flags`  
-2. Recompute:
-   - scroll mode ON/OFF  
-   - profile settings (mono/color-like)  
-   - geometry hints (40 vs 80 cols, 200 vs 400 lines)  
-3. If geometry changes, call:
-      screen_device::configure()
-4. Trigger any necessary reinitialization (bit 7 toggles)
-
-MODE_FLAGS must be treated as an active hardware register, not just a variable.
-
+```text
+C462.7 = which 200-line half is first
+C663   = line offset inside that half
+```
 
 ---
 
-## 8.4 Implementing SCROLL_IDX
+## 9. CPU VRAM Organization vs Display Origin
 
-When SCROLL_IDX changes:
+These are separate mechanisms.
 
-- Immediately update the **logical → physical row mapping**.
-- No VRAM copying is allowed.
-- GAVDP must treat the text window as a ring buffer.
+```text
+D068
+    controls how the CPU addresses VRAM
 
-This eliminates the early scrolling gaps that appeared before SCROLL_IDX was
-implemented properly.
+C462 / C663
+    control which part of the framebuffer is displayed
+```
 
+Changing `D068` changes the CPU's address interpretation.
 
----
+Changing `C462` or `C663` changes the display origin without copying framebuffer contents.
 
-## 8.5 Implementing scroll/erase mode
+A useful high-level model is:
 
-When MODE_FLAGS.bit8 transitions:
-
-### If 0 → 1 (enter scroll mode):
-- Mark all VRAM writes as non-pixel commands
-- Prepare internal state for row clearing
-- Capture any upcoming writes to D462
-
-### If 1 → 0 (exit scroll mode):
-- Resume pixel writes
-- The cleared row is now visible for text rendering
-
-### During scroll mode:
-- Do not modify bitmap pixels in VRAM
-- Instead, call a helper that:
-- Clears row(s) indicated by SCROLL_IDX
-- Uses D462 as a marker for which row to clear or reposition
-- Prepares VRAM for the next drawn character
-
-Correct scroll mode implementation is mandatory for faithful QX-11 behavior.
-
+```text
+                         QX-11 GAVDP
+                              |
+              +---------------+---------------+
+              |                               |
+        CPU VRAM VIEW                    DISPLAY ORIGIN
+              |                               |
+            D068                         C462 + C663
+              |                               |
+      bit7 selects layout            C462[6:0] horizontal
+         /             \              C462[7]  half select
+      ROW            COLUMN           C663     vertical
+```
 
 ---
 
-## 8.6 The `screen_update()` implementation
+## 10. BIOS Use of the Two Organizations
 
-`screen_update()` must reconstruct the entire frame from VRAM:
+The BIOS deliberately selects the organization appropriate to the operation.
 
-1. For each visible pixel row:
-2. For each column:
-3. Compute offset using the Mode 7 column formula:
-## 9. Known Unknowns & Areas for Future Reverse Engineering
+### 10.1 Mode initialization
 
-Although the QX-11 GAVDP implementation is now functional and matches observed
-hardware behavior in all tested software, several parts of the system remain
-partially understood or completely undocumented.
+The common `INT 10h / AH=00h` mode-set path eventually selects the row-oriented state.
 
-This section summarizes the remaining open questions and areas where further
-reverse engineering or hardware probing is beneficial.
+Therefore after a BIOS mode set, for the mode actually established:
 
+```text
+D068.7 = 1
+```
 
----
+This applies to the shared setup path for BIOS modes 0..7. A requested mode can be redirected depending on the monitor configuration, but the final mode is initialized row-centric.
 
-## 9.1 Undocumented Registers R3–R10
+### 10.2 Pixel services
 
-We know there are **11 total GAVDP registers**, mapped inside VRAM.  
-Only the following are fully decoded:
+The BIOS pixel services:
 
-- R0 = SCROLL_IDX  
-- R1 = MODE_FLAGS  
-- R2 = ATTR_LATCH  
+```text
+INT 10h AH=0Ch -> Write Pixel
+INT 10h AH=0Dh -> Read Pixel
+```
 
-Registers R3–R10:
+use the common pixel-address preparation path which selects row-centric organization first.
 
-- Are written by the BIOS during POST and mode transitions  
-- Are located in hidden VRAM columns beyond the visible range  
-- Do not correspond to pixel data  
-- Have consistent write patterns tied to timing, erase sequences, and geometry setup  
+Therefore:
 
-### Likely functions include:
+```text
+BIOS pixel addressing = row-centric
+```
 
-- CRTC-like timing fields  
-- Scanline dividers  
-- Cursor blink velocity  
-- Line height selectors  
-- Internal hardware state reset triggers  
-- Erase-window boundaries  
-- Functions that interact with GAVNIO for cursor or keyboard events  
+### 10.3 Character output
 
-Future work:
+The BIOS character paths explicitly select column-centric organization.
 
-- Log and compare every write across different modes  
-- Capture reads/writes from real hardware using a logic analyzer on VRAM address bus  
-- Identify which writes correlate with geometric changes or vertical timing  
-- Compare QC-11 (Japanese version) firmware behavior to QX-11
+This includes:
 
+```text
+INT 10h AH=09h -> write character + attribute
+INT 10h AH=0Ah -> write character
+INT 10h AH=0Eh -> teletype output
+```
 
----
+The BIOS software cursor uses the same column-selection path.
 
-## 9.2 Complete bitfield decoding for MODE_FLAGS
+Therefore:
 
-We have fully decoded:
+```text
+BIOS character rendering = column-centric
+BIOS software cursor     = column-centric
+```
 
-- Bit 8 → scroll/erase mode  
-- Bit 7 → internal latch/timing reset  
+### 10.4 Scroll / clear
 
-But the remaining bits control:
+The general BIOS scroll-window path selects the row-oriented state before its framebuffer work.
 
-- 40/80 column selection  
-- High/low scan modes  
-- Intensity and attribute mapping  
-- Layout mode (text vs graphics overrides)  
-- Possibly alternate character sets (QC-11 feature)  
+Mode initialization also clears framebuffer rows while row-centric organization is selected.
 
-More analysis is required to:
+That is consistent with the row layout, where bytes across X are consecutive.
 
-- Map each profile pattern to specific output changes  
-- Identify which bits trigger geometry recompute  
-- Understand color/intensity conversion rules for pseudo-color mode
+### 10.5 No universal persistent default
 
+The selected organization remains active until another BIOS or application operation changes it.
 
----
+For example:
 
-## 9.3 The role of D462
+```text
+Set video mode
+    -> row-centric
 
-We know:
+Print a character
+    -> column-centric
 
-- BIOS writes to VRAM address **0x8D462** during scroll sequences
-- This address is referenced only when MODE_FLAGS.bit8 = 1
-- It acts as a reference row or clear boundary
+Read/write a pixel
+    -> row-centric
+```
 
-Unknowns:
+So the most precise statement is:
 
-- Does it encode a physical VRAM offset?  
-- Does it define a top or bottom erase window?  
-- Does it synchronize ring-buffer wrapping?  
-- Does it modify scroll acceleration or chunk size?
-
-Further logging and real-hardware observation needed.
-
+> **Row-centric is the BIOS mode-initialization and graphics-operation state. Column-centric is the BIOS character/cursor-rendering state.**
 
 ---
 
-## 9.4 Exact behavior of scroll/erase VRAM write sequences
+## 11. BIOS Software Cursor and D068
 
-While the emulator now correctly handles:
+The QX-11 software cursor is relevant because its periodic redraw can change `D068`.
 
-- Scroll up  
-- Full-screen clear  
-- Partial-row clearing  
+### 11.1 Cursor interference discovered on real hardware
 
-We still have unknowns:
+During early row-oriented tests the image sometimes became a mixture of horizontal and vertical fragments.
 
-- Which specific addresses trigger which erase events  
-- Whether some values initiate multi-line clears  
-- How many bytes GAVDP samples per row clear  
-- Whether a write of 0xFF differs from 0x00  
-- Whether VRAM writes target hidden row buffers
+The reason was:
 
-To fully decode this, one may:
+```text
+application:
+    D068.7 = 1
+    begin row-oriented drawing
 
-- Record every write during scroll mode  
-- Compare the pattern against the final displayed result  
-- Inject modified VRAM write sequences and observe behavior on real hardware  
+INT 71h:
+    BIOS cursor renderer runs
+    BIOS selects column organization
+    D068.7 = 0
 
+application resumes:
+    continues using row-oriented offsets
+    hardware now interprets them as column-oriented offsets
+```
 
----
+This explains the characteristic distortion seen in the original tests.
 
-## 9.5 Timing registers and BIOS 11-byte tables
+### 11.2 BIOS video-busy flag
 
-The BIOS contains:
+The BIOS uses an internal video-busy byte at:
 
-- Mode-dependent 11-byte timing tables at CS:4A78  
-- Optional 4-byte overrides at CS:4AD0
+```text
+0000:089C
+```
 
-While we know these configure internal GAVDP timing, we do not know:
+Bit 0 is used by BIOS video operations.
 
-- The meaning of each byte  
-- Which fields correspond to horizontal/vertical sync  
-- Whether some fields control attribute stepping or scanline duplication  
-- Whether GAVDP performs smoothing or line weighting  
+The periodic cursor service checks the busy state and skips cursor rendering while video work is active.
 
-A correlation table must be built by:
+Real-hardware testing confirmed that setting this busy flag protects a row-oriented operation while interrupts remain enabled.
 
-- Comparing different BIOS modes  
-- Checking the QC-11 Japanese BIOS timing tables  
-- Verifying behavior on a logic analyzer
+### 11.3 Disabling the BIOS cursor
 
+The normal BIOS cursor-shape call:
 
----
+```asm
+mov ah,01h
+mov cx,2000h
+int 10h
+```
 
-## 9.6 Interaction with GAVNIO (I/O gate array)
+places the cursor service into a disabled state.
 
-GAVDP does not operate independently:
+BIOS analysis shows that the `INT 71h` cursor service then skips the cursor-renderer call.
 
-- Cursor blink  
-- Keyboard-driven cursor updates  
-- Interrupt-driven screen refresh events  
-- Timer-based erase operations  
+Consequently:
 
-All require coordination between:
+- `INT 71h` still runs
+- timer services still run
+- the cursor renderer does not run
+- cursor blink no longer forces `D068.7=0`
 
-- GAVDP  
-- GAVNIO (keyboard + serial + timers)  
-- GAVNIT (interrupt routing/aggregation)  
-
-Exactly how these chips communicate is still under active study.
-
+An application that permanently disables the BIOS cursor, avoids BIOS text rendering during an application-owned row operation, and explicitly manages `D068` does not need to use the BIOS busy flag solely to protect against cursor blink.
 
 ---
 
-## 9.7 Cursor rendering behavior
+## 12. D269 — Partial Decode
 
-The cursor on the QX-11:
+`D269` is still only partially understood.
 
-- Can blink  
-- Can appear as underline or block  
-- Is drawn by BIOS routines, not GAVDP hardware  
-- Uses ATTR_LATCH to modify appearance  
-- Sometimes relies on scroll/erase mode to clear old cursor positions
+The established display-control behavior is:
 
-Unknowns:
+```text
+D269.7 = 1 -> display disabled / blanked
+D269.7 = 0 -> display enabled
+```
 
-- Whether GAVDP has any cursor-specific hardware modes  
-- Whether timing registers indirectly affect cursor blink rate  
-- How GAVNIO’s timer interrupts influence cursor redraw frequency  
+The BIOS also modifies lower bits during character/attribute-related work, but their individual meanings are not yet sufficiently decoded.
 
+The previous description of `D269` as a fully decoded PC-like attribute latch should therefore be considered obsolete.
 
 ---
 
-## 9.8 Unused or hidden video modes
+## 13. Other GAVDP Control Locations
 
-There may exist undocumented or partially supported modes:
+The following addresses are known to be actively programmed by the BIOS but remain incompletely decoded:
 
-Possible examples:
+```text
+C060
+C261
+C864
+CA65
+CC66
+CE67
+D46A
+```
 
-- 80-column “high intensity” modes  
-- Alternate Japanese glyph tables (QC-11)  
-- Graphics overlays using attribute bits  
-- Split-screen or partial-window text modes  
-- Interlaced or alternate scan modes in timing tables
+`C060` is especially interesting because BIOS page-switching code writes different values to it while also programming display-origin registers.
 
-These modes might be discovered by:
-
-- Injecting custom MODE_FLAGS values  
-- Testing alternate timing tables  
-- Running QC-11 software on QX-11 hardware  
-
-
----
-
-## 9.9 Required future testing on real hardware
-
-To refine the emulator further:
-
-- Capture VRAM bus traces during:
-  - Scroll up  
-  - Full clear  
-  - Mode change  
-  - Cursor blink  
-- Test effects of writing nonstandard values to registers  
-- Observe results of changing timing tables at runtime  
-- Compare QX-11 vs QC-11 behavior for attribute and scroll modes  
-
+Do not assign exact meanings to these registers until isolated real-hardware tests or stronger BIOS evidence establish them.
 
 ---
 
-## 9.10 Summary of known unknowns
+## 14. MAME Implementation Notes
 
-Despite the large number of undocumented features, the core behaviors are
-accurately reproduced:
+MAME should follow the physical hardware rules even if older emulator behavior allowed software to work with an always-column-oriented mapping.
 
-- Scroll engine  
-- Attribute latch  
-- Mode switching  
-- High-resolution rendering  
-- BIOS-based VT-like text output  
+### 14.1 Required D068 behavior
 
-But future work is needed to fully decode timing registers, hidden attributes,
-cursor rules, and the remaining eight GAVDP registers.
+Conceptually:
 
-The final section summarizes the complete GAVDP hardware model as currently understood.
-## 10. Summary of the GAVDP Hardware Model
+```text
+if D068.7 == 0:
+    CPU uses column-oriented mapping
 
-This final section consolidates everything known about the Epson QX-11 GAVDP
-video processor.  
-The goal is to provide a single, high-level, accurate reference for emulator
-development and for anyone studying QX-11 hardware behavior.
+if D068.7 == 1:
+    CPU uses row-oriented mapping
+```
 
+Mode 7 additionally changes the lower-half segment alias:
 
----
+```text
+column:
+    top    = 8000h
+    bottom = 8010h
 
-## 10.1 Core architecture
+row:
+    top    = 8000h
+    bottom = 9000h
+```
 
-GAVDP is a **1-bit-per-pixel, column-oriented video processor** with:
+### 14.2 Display origin is independent
 
-- Memory-mapped VRAM (no video I/O ports)
-- A high-resolution 640×400 bitmap mode
-- Text rendering implemented by BIOS routines
-- A hardware scroll engine based on ring-buffer indexing
-- Internal timing and control registers only accessible indirectly via BIOS
+`C462` and `C663` must be implemented as display-fetch origin state, not as consequences of the CPU VRAM layout.
 
+At minimum:
 
----
+```text
+C462[6:0] = horizontal byte-column origin
+C462[7]   = Mode-7 200-line half selector
+C663      = vertical scanline origin within selected half
+```
 
-## 10.2 VRAM model (Mode 7 bitmap)
+### 14.3 Remove the obsolete D068 "bit 8 scroll mode" model
 
-- VRAM is organized vertically into 0x200-byte columns
-- Each column represents 8 horizontal pixels × 400 vertical pixels
-- Visible 80 columns = 40 KiB bitmap region
-- Additional hidden columns store:
-  - GAVDP registers
-  - Internal control data
-  - Temporary buffers
+`D068` is byte-written by the BIOS.
 
-Pixel addressing formula:
+The current evidence supports bit 7 as the row/column organization selector. The earlier theory that `D068` had a "bit 8 scroll/erase mode" is not valid and should not be implemented.
 
-column = x / 8
-bit = 7 - (x & 7)
-row = y
-offset = row (+ 0x100 if y >= 200)
-vram_idx = (column * 0x200) + offset
+Scrolling and clearing should instead be understood from the actual BIOS memory operations and the `C462/C663` display-origin mechanism.
 
+### 14.4 Suggested emulator validation
 
-This column-centric design allows efficient scrolling.
+A useful validation suite should test:
 
-
----
-
-## 10.3 GAVDP registers (11 total)
-
-Three fully decoded:
-
-| Address     | Name         | Purpose                                |
-|-------------|--------------|----------------------------------------|
-| 0x8C663     | SCROLL_IDX   | Ring buffer row origin                 |
-| 0x8D068     | MODE_FLAGS   | Profile, mode control, scroll mode     |
-| 0x8D269     | ATTR_LATCH   | Text rendering attribute latch         |
-
-Eight additional registers (R3–R10) are known but not yet decoded.  
-The BIOS writes to them during mode setup and POST.
-
+1. `D068.7=0` + column formula -> correct geometry.
+2. `D068.7=1` + row formula -> same correct geometry.
+3. Wrong formula under either organization -> expected characteristic distortion.
+4. Mode-7 column lower half at `8010h`.
+5. Mode-7 row lower half at `9000h`.
+6. `C462` increments -> 8-pixel horizontal origin steps.
+7. `C462.7` -> swap Mode-7 200-line halves.
+8. `C663` increments -> one-scanline vertical origin steps.
+9. BIOS character output -> leaves column organization selected.
+10. BIOS pixel operation -> leaves row organization selected.
+11. Cursor disabled with `CX=2000h` -> no periodic cursor-induced D068 switch.
 
 ---
 
-## 10.4 Scroll/erase engine
+## 15. Native Software Guidance
 
-Scrolling requires:
+Applications should explicitly select the VRAM organization they require.
 
-- Updating `SCROLL_IDX`
-- Enabling scroll mode (`MODE_FLAGS.bit8 = 1`)
-- Writing to D462 (erase boundary)
-- Performing special VRAM writes interpreted as erase commands
-- Disabling scroll mode
+Do not depend on the organization left behind by an earlier BIOS call.
 
-The hardware uses the ring buffer index to map the top row logically, without
-copying VRAM data.
+A safe policy is:
 
-This mechanism is **mandatory** for correct QX-11 emulation.
+1. Preserve the monitor-profile bits.
+2. Select row or column state explicitly.
+3. Use the addressing formula that matches that state.
+4. Avoid BIOS character output while temporarily using application-owned row mode.
+5. If the BIOS cursor remains active, protect temporary row-mode operations.
+6. If the BIOS cursor is permanently disabled, cursor-blink interference with `D068` is eliminated.
 
+For monochrome Mode 6:
 
----
+```text
+column combined writes -> 9010h
+row combined writes    -> 9008h
+```
 
-## 10.5 Text rendering pipeline
+This permits primitives to choose the most efficient organization:
 
-The BIOS performs text rendering using bitmap glyphs stored in ROM:
-
-1. INT 10h AH=0Eh is called  
-2. BIOS fetches glyph from character ROM  
-3. GAVDP samples `ATTR_LATCH`  
-4. Glyph is written into VRAM as 1-bpp bitmap  
-5. ACTIVE display is recomposed using column layout  
-
-Foreground/background mapping depends on:
-
-- ATTR_LATCH  
-- MODE_FLAGS profile bits  
-
-This is how inverse video, highlighting, boldness, and menu bars appear.
-
+| Primitive | Natural organization |
+|---|---|
+| long horizontal line | row |
+| horizontal fill / clear | row |
+| staff line / beam | row |
+| glyph | column |
+| vertical stem | column |
+| software cursor / sprite | column |
+| arbitrary RMW pixel | explicitly managed |
 
 ---
 
-## 10.6 Mode switching (INT 10h AH=00)
+## 16. Confirmed vs. Unresolved
 
-The BIOS mode-set process includes:
+### Confirmed on real hardware
 
-- Reading DIP switches
-- Selecting display profile (40/80 columns, mono/color-like)
-- Loading timing tables (11-byte blocks)
-- Pushing timing into GAVDP internal registers
-- Resetting scroll index and attributes
-- Performing full-screen clear using scroll-erase mode
+- `D068.7=0` selects column-centric CPU addressing.
+- `D068.7=1` selects row-centric CPU addressing.
+- Mode-7 column mapping uses `8000h / 8010h`.
+- Mode-7 row mapping uses `8000h / 9000h`.
+- `C462[6:0]` changes the horizontal origin in 8-pixel steps.
+- `C462.7` swaps the two Mode-7 200-line display halves.
+- `C663` changes vertical origin one scanline per increment.
+- Mode-6 `9010h` works as a column-oriented combined write aperture.
+- Mode-6 `9008h` works as the row-oriented combined write aperture in the diagnostic.
+- BIOS video-busy protection prevents software-cursor interference during row-oriented access.
+- `D269.7` disables/blanks the display.
 
-Any emulator implementing QX-11 must replicate this exact sequence.
+### Confirmed by BIOS analysis and consistent with hardware observations
 
+- BIOS mode initialization selects row-centric access.
+- BIOS pixel read/write selects row-centric access.
+- BIOS scroll/clear paths select row-centric access.
+- BIOS character rendering selects column-centric access.
+- BIOS software cursor selects column-centric access.
+- Mode-7 BIOS display-origin code splits a 400-line origin between `C462.7` and `C663`.
+- `D068` lower-profile values are selected from `02h`, `03h`, `05h`, and `07h`.
 
----
+### Still unresolved
 
-## 10.7 Interaction with other gate arrays
-
-GAVDP does not operate in isolation — it cooperates with:
-
-- **GAVNIO** (I/O controller)  
-  - Timer events  
-  - Cursor blink  
-  - Keyboard interrupts  
-
-- **GAVNIT** (interrupt routing)  
-  - Ensures correct firing of INT 70h–75h  
-  - Provides timing used to update cursor and keyboard state  
-
-Timing and profile changes in GAVDP ripple through the rest of the system.
-
-
----
-
-## 10.8 Dynamic resolution and geometry
-
-The QX-11 supports:
-
-- 80×25 text  
-- 40×25 text  
-- 640×200 graphics  
-- 640×400 graphics  
-
-Resolution depends on:
-
-- MODE_FLAGS  
-- BIOS timing blocks  
-- Character height variables  
-- DIP switch settings  
-
-The emulator must reconfigure its screen device dynamically based on these rules.
-
+- exact electrical/timing meaning of `D068` bits 2..0 beyond the known profile values
+- exact mapping of `03h`, `05h`, and `07h` to the three color monitor configurations
+- function, if any, of `D068` bits 6..3
+- lower-bit semantics of `D269`
+- exact functions of `C060`, `C261`, `C864`, `CA65`, `CC66`, `CE67`, and `D46A`
+- read semantics of the combined/broadcast apertures
+- any additional undocumented GAVDP modes or aliases
 
 ---
 
-## 10.9 Classification of confirmed behaviors
+## 17. Summary
 
-| Behavior | Status |
-|---------|--------|
-| Column-oriented VRAM | Confirmed & fully implemented |
-| 1-bpp rendering | Confirmed |
-| SCROLL_IDX ring buffer | Confirmed |
-| Scroll/erase mode (bit 8) | Fully decoded |
-| ATTR_LATCH text attributes | Fully decoded |
-| Timing blocks | Partially decoded |
-| Profiles / MODE_FLAGS low bits | Partially decoded |
-| Registers R3–R10 | Undocumented |
-| Mixed-mode behavior (text over bitmap) | Not used by BIOS; unconfirmed |
-| Interaction with GAVNIO timers | Known but needs measurement |
+The QX-11 framebuffer should no longer be described as simply column-oriented.
 
+The GAVDP exposes the same framebuffer through two selectable CPU organizations:
 
----
+```text
+D068.7 = 1 -> row-centric
+D068.7 = 0 -> column-centric
+```
 
-## 10.10 Fidelity goals for the emulator
+The BIOS deliberately uses both:
 
-A correct GAVDP implementation must:
+```text
+mode set / pixels / clears / scrolling -> row
+characters / software cursor           -> column
+```
 
-- Produce pixel-perfect VRAM output for BIOS text  
-- Scroll without gaps, tearing, or flicker  
-- Handle all MODE_FLAGS transitions  
-- Honor BIOS timing table behavior  
-- Allow dynamic resizing of the visible screen  
-- Correctly render SETUP screens and DOS prompts  
-- Support BIOS cursor logic and INT 10h services  
-- Accept writes to hidden registers without breaking behavior  
+The display origin is a separate mechanism:
 
-The MAME driver, as currently designed, fulfills these goals with high accuracy.
+```text
+C462[6:0] -> horizontal byte-column origin
+C462[7]   -> Mode-7 200-line half selector
+C663      -> vertical scanline origin within that half
+```
 
-
----
-
-## 10.11 Final notes
-
-The Epson QX-11 video architecture is an elegant hybrid:
-
-- PC-compatible BIOS entry points  
-- Proprietary gate-array hardware  
-- High-resolution business-oriented display  
-- Fast scroll engine tuned for 8088 performance  
-- Simple but flexible 1-bpp rendering pipeline  
-
-GAVDP demonstrates a level of design sophistication that exceeds early IBM PC
-video hardware, particularly in scrolling efficiency and dynamic resolution
-handling.
-
-This document represents the most complete reconstruction of the system to
-date, based on meticulous emulator development and real-hardware analysis.
-
-**End of GAVDP documentation.**
+This model is supported by repeatable real-QX-11 tests and BIOS analysis and should be used as the reference behavior for future QX-11 software and emulator work.
