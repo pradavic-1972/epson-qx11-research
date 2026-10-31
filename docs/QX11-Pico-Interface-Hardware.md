@@ -15,6 +15,22 @@ The interface separates two jobs:
 
 > **Documentation scope:** This document describes the saved GAL/Pico hard-drive implementation and the latest compact board pin map. Check the PCB revision and actual fitted devices before reproducing connections. Mermaid diagrams render directly on GitHub; they explain logical behavior and are not substitutes for the electrical schematic.
 
+## Hardware photographs
+
+These photographs show the assembled **Rev C / SMT** HD-Pico card and its installation inside the Epson QX-11. They document the physical board; the later compact PCB revision discussed below is a separate design revision.
+
+### Assembled card
+
+![Assembled QX-11 Pico interface Rev C card with Pico 2 W, socketed logic devices, patch wiring and microSD card](assets/images/qx11-pico/hd-pico-rev-c-assembled.jpg)
+
+*The assembled card on the workbench, showing the Pico 2 W, GAL and buffer circuitry, configurable patch headers, and populated microSD interface. Photograph: October 29, 2026.*
+
+### Installed in the QX-11
+
+![HD-Pico Rev C expansion card installed inside the Epson QX-11 chassis](assets/images/qx11-pico/hd-pico-rev-c-installed.jpg)
+
+*The card installed inside the QX-11, showing its placement relative to the motherboard and surrounding components. Photograph: October 24, 2026.*
+
 ## Hardware blocks
 
 ```mermaid
