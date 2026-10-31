@@ -1,89 +1,49 @@
+<div align="center">
+
 # Epson QX-11 Research Archive
+**Hardware archaeology · Firmware analysis · Emulation**
 
-This repository documents the technical details, discoveries, ROM dumps, schematics, and experimental work related to the **Epson QX-11** computer, also known in Japan as the **QC-11** and in Latin America (Venezuela) as the **Abacus**.
+Preserving the Epson QX-11, Japanese QC-11, and Venezuelan Abacus.
 
-The QX-11 is a little-known MS-DOS-compatible system produced by Epson in the early 1980s, featuring a unique architecture, proprietary video and floppy systems, and a ROM cartridge slot used primarily for kanji fonts or application software.
+[Explore the research](Reverse%20Engineering/README.md) · [ROMs & boot flow](roms/README.md) · [Hardware photos](photos/motherboard/README.md) · [QX-16 companion archive](https://github.com/pradavic-1972/epson-qx16-research)
 
----
+<img src="photos/QX11-Front.jpg" alt="Epson QX-11 front view" width="720">
 
-## 🧠 Purpose of This Project
-
-This archive aims to:
-
-- Preserve knowledge about the QX-11, its hardware, and firmware
-- Reverse-engineer undocumented components like the **GAFDDC** floppy gate array
-- Share ROM dumps and tools for analysis or emulation
-- Provide schematics and documentation for modern upgrades and repairs
-- Assist other retrocomputing enthusiasts in understanding and working with this rare system
+</div>
 
 ---
 
-## 🛠️ Current Highlights
+## Start with your project
 
-### ✅ ROM Dumps
-- Original 32KB QX-11 [BIOS](roms/EPSON_ABACUS_M25141CA.BIN) and [MS-DOS 2.11](roms/EPSON_ABACUS_M25140CA.BIN) ROM
-- Expanded 64KB MSDOS [ROM](roms/ROMI.bin)
+| I want to… | Start here | Continue with |
+| :--- | :--- | :--- |
+| Understand the hardware | [Gate-array overview](Reverse%20Engineering/gate-arrays.md) | [IC inventory](ICs/Readme.md) · [Datasheets](Datasheets/index.md) |
+| Investigate memory and ROMs | [GAVEMR memory logic](Reverse%20Engineering/GAVEMR.md) | [ROM expansion](Reverse%20Engineering/rom_expansion.md) · [Cartridge interface](Reverse%20Engineering/Cartridge.md) |
+| Work on video | [GAVDP video hardware](Reverse%20Engineering/GAVDP.md) | [BIOS INT 10h](Reverse%20Engineering/INT10.md) · [RGB graphics](Reverse%20Engineering/QX11_RGB_Color_Graphics.md) |
+| Boot software | [Floppy boot notes](Reverse%20Engineering/qx11_floppy_boot.md) | [Disk images](software/) · [ELKS experiment](Reverse%20Engineering/boot_elks_on_qx11.md) |
+| Develop emulation | [MAME research](mame/README.md) | [Interrupt vectors](Reverse%20Engineering/QX11_IVT_Groups.md) · [HD-10 protocol](Reverse%20Engineering/Hard%20Drive%20access%20EPSON%20HD-10.md) |
+| Compare Epson platforms | [QX-11 / QX-16 comparison](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/QX11-QX16-Comparison.md) | [Cross-reference guide](CROSS_REFERENCES.md) |
 
-### ✅ Reverse Engineering
-- Analyze the function of the QX-11 [Gate-Arrays](Reverse%20Engineering/gate-arrays.md)
-- Making a disk [bootable](Reverse%20Engineering/qx11_floppy_boot.md) on the QX-11
-- Address decoding for ROM [cartridge](Reverse%20Engineering/Cartridge.md) slot
-- How the QX-11 communicates with the [EPSON HD-10](Reverse%20Engineering/Hard%20Drive%20access%20EPSON%20HD-10.md) external hard drive.
-- [ROM Size selection and expanded 64KB ROM](Reverse%20Engineering/rom_expasion.md) 
+## Explore the archive
 
-### ✅ Experiments
-- **Boot [ELKS](Reverse%20Engineering/boot_elks_on_qx11.md)**
-- **RAM Expansion** up to 1MB using Raspberry Pi Pico
-- **PSU Replacement** using modern switching supplies
-- **Custom VGA Output** interfaced via GPIO (Pico-based)
+**Hardware & firmware** — [Reverse engineering](Reverse%20Engineering/README.md), [ROM analysis and dumps](roms/README.md), [keyboard interface](Reverse%20Engineering/qx11_keyboard.md), and [motherboard photographs](photos/motherboard/README.md).
 
----
+**Software & experiments** — [QX-11 Invaders](software/games/QX11%20Invaders/README.md), [QX-11 Chess](software/games/qx11-chess/README.MD), [MAME development](mame/README.md), and [Pico interface hardware](docs/QX11-Pico-Interface-Hardware.md).
 
-## 📷 Gallery
+**History & preservation** — [Magazine scans](magazine-scans/README.md), [Japanese QC-11 article](magazine-scans/ascii_aug1985/QC11_Article/README.md), and [Abacus advertisement](magazine-scans/mundoAtari_1988/qx11_ad_translation.md).
 
-See `/photos/` for high-res images of:
-- [QX-11 motherboard](photos/motherboard/README.md)
-- GAFDDC chip and FDC region
-- Power supply area with TL494s
-- Expansion slots and video port
+## Connected research
 
----
+The [QX-16 archive](https://github.com/pradavic-1972/epson-qx16-research) provides a companion view of Epson hardware. Use the [topic-by-topic cross-reference guide](CROSS_REFERENCES.md) to move between video, interrupts, storage, and repair documentation.
 
-## 📚 Related Systems
+These are different platforms. Shared components and related research do not establish interchangeable register maps, firmware, or hardware modifications. The individual articles retain their own findings, hypotheses, and limitations.
 
-This work relates to:
-- Epson QX-10 and [QX-16](https://github.com/pradavic-1972/epson-qx16-research)
-- NEC µPD765 floppy controllers
-- Early MS-DOS machines with cartridge support
+## Contribute
 
----
+Corrections, measurements, ROM provenance, photographs, translations, and reproducible experiments are welcome through issues and pull requests. Include the machine variant, relevant article, and evidence so findings can be checked.
 
-## 📄 License
+## License & preservation
 
-- 🧩 All **code** (scripts, tools, KiCad files) is licensed under the [MIT License](LICENSE).
-- 📸 All **images**, **ROM dumps**, **text documentation**, and **diagrams** are licensed under the [Creative Commons Attribution 4.0 International (CC BY 4.0)](https://creativecommons.org/licenses/by/4.0/) license.
+Code, scripts, tools, and KiCad files use the [MIT License](LICENSE). Images, text documentation, diagrams, and ROM dumps are described under [CC BY 4.0](LICENSE-CC-BY.txt); please credit this repository.
 
-Please credit this repository when reusing content.
-
----
-
-## 🙌 Contributions
-
-Pull requests are welcome for:
-- Additional photos or ROMs
-- Hardware mods and writeups
-- Documentation or translations
-
----
-
-## 💾 Disclaimer
-
-ROM dumps and photos are shared for **educational and preservation purposes only**. The copyright of any original software belongs to its respective owners.
-
----
-
-## 🔗 External Links
-
-- [Retrocomputing Wiki](https://wiki.retrocomputing.net/)
-- [Datasheet: uPD765AC](https://archive.org/details/nec-upd765-datasheet)
-- [GAFDDC Analysis (WIP)](LINK_TO_YOUR_WRITEUP_HERE)
+Original software copyright remains with its respective owners. ROM dumps and photos are shared for educational and preservation purposes.

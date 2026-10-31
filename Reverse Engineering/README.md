@@ -37,7 +37,7 @@ Unlike a standard IBM PC design, the QX-11 integrates many hardware functions in
 
 ## Memory and DRAM Controller
 
-### `GAVEMR.md`
+### [GAVEMR.md](GAVEMR.md)
 
 Research and reverse engineering notes for the Epson GAVEMR memory gate array.
 
@@ -57,7 +57,7 @@ Topics include:
 
 ## Video Hardware
 
-### `GAVDP.md`
+### [GAVDP.md](GAVDP.md)
 
 Reverse engineering documentation for the GAVDP video gate array.
 
@@ -77,7 +77,7 @@ Topics include:
 
 ## Cartridge System
 
-### `Cartridge.md`
+### [Cartridge.md](Cartridge.md)
 
 Documentation of the QX-11 cartridge system and ROM expansion architecture.
 
@@ -94,7 +94,7 @@ Topics include:
 
 ## Hard Drive Interface
 
-### `Hard Drive access EPSON HD-10.md`
+### [Hard Drive access EPSON HD-10.md](Hard%20Drive%20access%20EPSON%20HD-10.md)
 
 Analysis of the Epson HD-10 hard drive subsystem and communication interface.
 
@@ -111,7 +111,7 @@ Topics include:
 
 ## Interrupt Vector Table
 
-### `IVT.md`
+### [Interrupt vector groups](QX11_IVT_Groups.md)
 
 Documentation and analysis of the Epson QX-11 Interrupt Vector Table.
 
@@ -203,3 +203,7 @@ This documentation is based on reverse engineering and experimentation performed
 Some conclusions remain theoretical and may evolve as additional discoveries are made.
 
 Contributions, corrections, and additional hardware information are welcome.
+
+## Related research
+
+[QX-11 / QX-16 topic guide](../CROSS_REFERENCES.md) · [Archive home](../README.md)
