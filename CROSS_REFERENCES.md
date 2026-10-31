@@ -1,0 +1,18 @@
+# Epson research cross-references
+
+A reading map connecting the QX-11 and QX-16 archives. Links identify related documentation, not proof of hardware or software compatibility.
+
+| Topic | QX-11 reference | QX-16 reference | How to use the connection |
+| :--- | :--- | :--- | :--- |
+| Platform architecture | [Gate arrays](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/gate-arrays.md) | [QX-11 / QX-16 comparison](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/QX11-QX16-Comparison.md) | Start with the comparison before transferring findings between machines. |
+| Video | [GAVDP](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/GAVDP.md) · [INT 10h](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/INT10.md) | [ICRT / VMM6](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/ICRT_VMM6.md) | Compare the documented display paths; keep register maps platform-specific. |
+| Interrupts and timing | [GAVNIT](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/gavnit.md) · [IVT groups](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/QX11_IVT_Groups.md) | [Interrupt model](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/Epson_interrupt_model.md) · [INT 71h timer](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/INT_71_Timer.md) | Follow interrupt routing and timer behavior in each platform's notes. |
+| Storage and boot | [Floppy boot](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/qx11_floppy_boot.md) · [ROM boot flow](https://github.com/pradavic-1972/epson-qx11-research/blob/main/roms/README.md) | [Architecture and boot comparison](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/QX11-QX16-Comparison.md) | Distinguish ROM-based boot behavior from the QX-16 boot architecture. |
+| External storage | [HD-10 interface](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/Hard%20Drive%20access%20EPSON%20HD-10.md) | [EPSP serial block driver](https://github.com/pradavic-1972/epson-qx16-research/blob/main/software/EPSP/README.md) | These are separate interfaces. The EPSP article explains its QX-11 research background and QX-16 implementation. |
+| Keyboard and repair | [Keyboard interface](https://github.com/pradavic-1972/epson-qx11-research/blob/main/Reverse%20Engineering/qx11_keyboard.md) · [Motherboard photos](https://github.com/pradavic-1972/epson-qx11-research/blob/main/photos/motherboard/README.md) | [Keyboard power repair](https://github.com/pradavic-1972/epson-qx16-research/blob/main/troubleshooting/qx16_keyboard_power_repair_with_svg.md) · [PSU replacement](https://github.com/pradavic-1972/epson-qx16-research/blob/main/Reverse%20Engineering/psu_replacement.md) | Use the article for the exact machine; connector and power details need model-specific verification. |
+
+## Source status
+
+This is a navigation layer over working research. It does not reconcile conflicting technical claims or mark hypotheses as confirmed. In particular, the QX-11 gate-array overview and MAME summary use GAVNMR terminology while the dedicated memory article is named GAVEMR; consult the underlying evidence before treating the names as equivalent.
+
+[QX-11 archive](https://github.com/pradavic-1972/epson-qx11-research) · [QX-16 archive](https://github.com/pradavic-1972/epson-qx16-research)

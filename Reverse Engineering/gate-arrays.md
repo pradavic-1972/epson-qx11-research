@@ -15,7 +15,7 @@ This file documents everything known so far, including interaction diagrams, VRA
 3. [GAVNIO](gavnio.md) – I/O & Keyboard Gate Array  
 4. [GAVNIT](gavnit.md) – Interrupt & Host Timer Gate Array  
 5. GAFDDC – Floppy Drive Control Gate Array  
-6. [GAVDP](gavdp.md) – Video Display Processor Gate Array  
+6. [GAVDP](GAVDP.md) – Video Display Processor Gate Array  
 7. [GAVEMR](GAVEMR.md) – RAM/ROM Memory control  
 8. Complete System Interaction Diagram  
 9. Summary  
@@ -395,3 +395,7 @@ The last remaining GA (GAVNMR) appears to be purely for memory refresh and is no
 The **GAVDP** and **GAVNIT** continue to be active areas of reverse engineering as we decode more of their internal logic, register interactions, and timing systems.
 
 ---
+
+## Related reading
+
+[Research index](README.md) · [Cross-platform topic guide](../CROSS_REFERENCES.md)
